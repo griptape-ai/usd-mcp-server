@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "usd-mcp"
+version = "0.1.0"
+description = "MCP server for Pixar USD (Universal Scene Description)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [
+  { name = "usd-mcp authors" }
+]
+dependencies = [
+  "mcp>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-org/usd-mcp"
+Issues = "https://github.com/your-org/usd-mcp/issues"
+
+[project.scripts]
+usd-mcp = "usd_mcp.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/usd_mcp"]
+
+
