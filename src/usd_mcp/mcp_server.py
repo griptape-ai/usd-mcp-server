@@ -169,6 +169,21 @@ TOOLS: Dict[str, Any] = {
         },
         "Stateless: read an attribute value from a file path.",
     ),
+    "set_attribute_value_in_file": (
+        t0.tool_set_attribute_value_in_file,
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "prim_path": {"type": "string"},
+                "attr": {"type": "string"},
+                "value": {},
+                "time": {"type": ["string", "number"], "default": "default"}
+            },
+            "additionalProperties": True
+        },
+        "Stateless: write an attribute value and save in place.",
+    ),
     "set_attribute_value": (
         t0.tool_set_attribute_value,
         {
@@ -216,10 +231,60 @@ TOOLS: Dict[str, Any] = {
 }
 
 
+# Provide camelCase aliases for clients that restrict tool names to letters/numbers
+def _to_camel(name: str) -> str:
+    parts = name.split("_")
+    if not parts:
+        return name
+    head, tail = parts[0], parts[1:]
+    return head + "".join(p[:1].upper() + p[1:] for p in tail)
+
+
+_aliases: Dict[str, Any] = {}
+for _name, _entry in list(TOOLS.items()):
+    if "_" in _name:
+        _camel = _to_camel(_name)
+        if _camel not in TOOLS:
+            _handler, _schema, _desc = _entry
+            _aliases[_camel] = (_handler, _schema, f"{_desc} (alias)")
+
+if _aliases:
+    TOOLS.update(_aliases)
+
+# Add short, alphanumeric-friendly aliases to guide clients
+_short_aliases = {
+    "open_stage": ["open"],
+    "close_stage": ["close"],
+    "list_open_stages": ["listStages"],
+    "get_stage_summary": ["stageSummary"],
+    "list_prims": ["listPrims"],
+    "get_prim_info": ["primInfo"],
+    "get_attribute_value": ["getAttr"],
+    "set_attribute_value": ["setAttr"],
+    "create_stage": ["create"],
+    "save_stage": ["save"],
+    "summarize_file": ["summarizeFile"],
+    "list_prims_in_file": ["listPrimsFile"],
+    "get_prim_info_in_file": ["primInfoFile"],
+    "get_attribute_value_in_file": ["getAttrFile"],
+    "set_attribute_value_in_file": ["setAttrFile"],
+}
+
+for _name, _alts in _short_aliases.items():
+    if _name in TOOLS:
+        _handler, _schema, _desc = TOOLS[_name]
+        for _alias in _alts:
+            if _alias not in TOOLS:
+                TOOLS[_alias] = (_handler, _schema, f"{_desc} (alias)")
+
+
 @server.list_tools()
 async def _list_tools() -> List[Tool]:
     tools: List[Tool] = []
     for name, (_handler, schema, description) in TOOLS.items():
+        # Some clients require tool names to be strictly alphanumeric
+        if not name.isalnum():
+            continue
         tools.append(Tool(name=name, description=description, inputSchema=schema))
     return tools
 

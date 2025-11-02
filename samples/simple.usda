@@ -7,8 +7,8 @@ def Xform "World"
 {
     def Cube "Cube"
     {
-        double size = 2
+        double size = 1.5
+        token visibility = "invisible"
     }
 }
-
 

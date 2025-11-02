@@ -369,6 +369,41 @@ def tool_get_attribute_value_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
     return _ok({"value": value})
 
 
+def tool_set_attribute_value_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
+    Usd, _, _, _ = _import_pxr()
+    path = _normalize_file_path(params.get("path"))
+    prim_path: str = params.get("prim_path")
+    attr_name: str = params.get("attr")
+    value = params.get("value")
+    when = params.get("time", "default")
+    if isinstance(prim_path, str):
+        prim_path = prim_path.strip()
+    if isinstance(attr_name, str):
+        attr_name = attr_name.strip()
+    if not path or not prim_path or not attr_name:
+        return error_response("invalid_params", "'path', 'prim_path', 'attr' are required")
+    if not os.path.exists(path):
+        return error_response("not_found", f"File does not exist: {path}")
+
+    stage = Usd.Stage.Open(path)
+    if stage is None:
+        return error_response("open_failed", f"Failed to open stage: {path}")
+    prim = stage.GetPrimAtPath(prim_path)
+    if not prim:
+        return error_response("not_found", f"Prim not found: {prim_path}")
+    attr = prim.GetAttribute(attr_name)
+    if not attr:
+        return error_response("not_found", f"Attribute not found: {attr_name}")
+    ok = attr.Set(value) if when == "default" else attr.Set(value, float(when))
+    if not ok:
+        return error_response("set_failed", f"Failed to set attribute: {attr_name}")
+    # Save in place
+    root = stage.GetRootLayer()
+    if not root.Save():
+        return error_response("save_failed", "Failed to save after set")
+    return _ok({"output_path": root.identifier})
+
+
 def tool_create_stage(params: Dict[str, Any]) -> Dict[str, Any]:
     Usd, UsdGeom, _, _ = _import_pxr()
     output_path: str = params.get("output_path")
