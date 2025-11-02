@@ -19,6 +19,11 @@ def _cmd_mcp(_: argparse.Namespace) -> int:
     return mcp_main()
 
 
+def _cmd_ws(args: argparse.Namespace) -> int:
+    from .ws_server import serve_ws
+
+    return serve_ws(host=args.host, port=args.port)
+
 def _cmd_client(args: argparse.Namespace) -> int:
     # Minimal local client: read a JSON request from stdin or --request
     if args.request:
@@ -50,6 +55,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_mcp = sub.add_parser("mcp-serve", help="Start the MCP stdio server (griptape-compatible)")
     p_mcp.set_defaults(func=_cmd_mcp)
+
+    p_ws = sub.add_parser("ws-serve", help="Start the MCP WebSocket server (ws://)")
+    p_ws.add_argument("--host", default="127.0.0.1")
+    p_ws.add_argument("--port", default=8765, type=int)
+    p_ws.set_defaults(func=_cmd_ws)
 
     p_client = sub.add_parser("client", help="Minimal local client for quick requests")
     p_client.add_argument("--request", help="Inline JSON request; if omitted, read from stdin")

@@ -2,17 +2,12 @@ from __future__ import annotations
 
 import json
 from typing import Any, Dict, List
-
-try:
-    from mcp.server import Server
-    from mcp.server.stdio import stdio_server
-    from mcp.types import TextContent, Tool
-except Exception as exc:  # pragma: no cover
-    raise RuntimeError(
-        "Missing 'mcp' package. Install with: pip install mcp"
-    ) from exc
-
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+from mcp.types import TextContent, Tool
 import anyio
+from types import SimpleNamespace
+from .version import __version__
 
 from .tools import tier0 as t0
 
@@ -20,12 +15,66 @@ from .tools import tier0 as t0
 server = Server("usd-mcp")
 
 
+def _normalize_args(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    # Coerce list-shaped inputs into a dict when possible
+    if isinstance(args, list):
+        if len(args) == 1 and isinstance(args[0], dict):
+            args = args[0]
+        elif all(isinstance(x, dict) for x in args):
+            merged: Dict[str, Any] = {}
+            for x in args:
+                merged.update(x)
+            args = merged
+        else:
+            args = {}
+
+    # Unwrap common wrappers like {"values": {...}} potentially nested
+    while isinstance(args, dict) and set(args.keys()) == {"values"} and isinstance(args.get("values"), dict):
+        args = args["values"]
+
+    def key_fingerprint(key: str) -> str:
+        return key.replace("_", "").replace(" ", "").lower()
+
+    synonyms: Dict[str, list[str]] = {
+        "path": ["path", "Path"],
+        "stage_id": ["stage_id", "stageId", "Stage Id", "stage id", "StageID"],
+        "prim_path": ["prim_path", "primPath", "Prim Path"],
+        "attr": ["attr", "attribute", "Attr", "Attribute"],
+        "output_path": ["output_path", "outputPath", "Output Path"],
+        "root": ["root", "Root"],
+        "typeFilter": ["typeFilter", "type_filter", "Type Filter", "type"],
+        "time": ["time", "Time"],
+        "flatten": ["flatten", "Flatten"],
+    }
+
+    fingerprint_to_canonical: Dict[str, str] = {}
+    for canonical, alts in synonyms.items():
+        for alt in alts:
+            fingerprint_to_canonical[key_fingerprint(alt)] = canonical
+
+    normalized: Dict[str, Any] = {}
+    for k, v in (args or {}).items():
+        if isinstance(k, str):
+            fp = key_fingerprint(k)
+            canonical = fingerprint_to_canonical.get(fp, k)
+            normalized[canonical] = v
+        else:
+            normalized[k] = v
+
+    return normalized
+
+
 # Define tool registry (name -> (handler, input schema, description))
 TOOLS: Dict[str, Any] = {
     "open_stage": (
         t0.tool_open_stage,
-        {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"], "additionalProperties": False},
+        {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": True},
         "Open a USD stage from a file path.",
+    ),
+    "summarize_file": (
+        t0.tool_summarize_file,
+        {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": True},
+        "Open a USD file temporarily and return a summary (no state).",
     ),
     "close_stage": (
         t0.tool_close_stage,
@@ -34,12 +83,12 @@ TOOLS: Dict[str, Any] = {
     ),
     "list_open_stages": (
         t0.tool_list_open_stages,
-        {"type": "object", "properties": {}, "additionalProperties": False},
+        {"type": "object", "properties": {}, "additionalProperties": True},
         "List open stages maintained by the server.",
     ),
     "get_stage_summary": (
         t0.tool_get_stage_summary,
-        {"type": "object", "properties": {"stage_id": {"type": "string"}}, "required": ["stage_id"], "additionalProperties": False},
+        {"type": "object", "properties": {"stage_id": {"type": "string"}}, "additionalProperties": True},
         "Summarize layers, roots, timecodes, upAxis, metersPerUnit.",
     ),
     "list_prims": (
@@ -57,6 +106,21 @@ TOOLS: Dict[str, Any] = {
         },
         "List prim paths under a root at limited depth.",
     ),
+    "list_prims_in_file": (
+        t0.tool_list_prims_in_file,
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "root": {"type": "string", "default": "/"},
+                "depth": {"type": "integer", "default": 1},
+                "typeFilter": {"type": ["string", "null"]}
+            },
+            "required": ["path"],
+            "additionalProperties": True
+        },
+        "Open a USD file and list prim paths (stateless).",
+    ),
     "get_prim_info": (
         t0.tool_get_prim_info,
         {
@@ -66,6 +130,15 @@ TOOLS: Dict[str, Any] = {
             "additionalProperties": False,
         },
         "Get type, attrs, rels, metadata for a prim.",
+    ),
+    "get_prim_info_in_file": (
+        t0.tool_get_prim_info_in_file,
+        {
+            "type": "object",
+            "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}},
+            "additionalProperties": True
+        },
+        "Stateless: get prim info from a file path.",
     ),
     "get_attribute_value": (
         t0.tool_get_attribute_value,
@@ -81,6 +154,20 @@ TOOLS: Dict[str, Any] = {
             "additionalProperties": False,
         },
         "Read an attribute value at a timeCode or default.",
+    ),
+    "get_attribute_value_in_file": (
+        t0.tool_get_attribute_value_in_file,
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "prim_path": {"type": "string"},
+                "attr": {"type": "string"},
+                "time": {"type": ["string", "number"], "default": "default"}
+            },
+            "additionalProperties": True
+        },
+        "Stateless: read an attribute value from a file path.",
     ),
     "set_attribute_value": (
         t0.tool_set_attribute_value,
@@ -141,19 +228,37 @@ async def _list_tools() -> List[Tool]:
 async def _call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
     entry = TOOLS.get(name)
     if not entry:
-        return [TextContent(text=json.dumps({"ok": False, "error": {"code": "unknown_tool", "message": name}}))]
+        return [TextContent.model_validate({"type": "text", "text": json.dumps({"ok": False, "error": {"code": "unknown_tool", "message": name}})})]
     handler = entry[0]
-    resp = handler(arguments)
+    try:
+        arguments = _normalize_args(name, arguments)
+        if not isinstance(arguments, dict):
+            arguments = {}
+        resp = handler(arguments)
+    except Exception as exc:
+        return [TextContent.model_validate({"type": "text", "text": json.dumps({"ok": False, "error": {"code": "call_failed", "message": str(exc)}})})]
     if not isinstance(resp, dict) or "ok" not in resp:
-        return [TextContent(text=json.dumps({"ok": False, "error": {"code": "bad_response", "message": "invalid"}}))]
+        return [TextContent.model_validate({"type": "text", "text": json.dumps({"ok": False, "error": {"code": "bad_response", "message": "invalid"}})})]
     if not resp["ok"]:
-        return [TextContent(text=json.dumps(resp["error"]))]
-    return [TextContent(text=json.dumps(resp.get("result", {})))]
+        payload = json.dumps(resp["error"]) if not isinstance(resp["error"], str) else resp["error"]
+        return [TextContent.model_validate({"type": "text", "text": payload})]
+    # Explicitly construct a dict and validate into TextContent to satisfy strict clients
+    return [TextContent.model_validate({"type": "text", "text": json.dumps(resp.get("result", {}))})]
 
 
 async def _main_async() -> int:
     async with stdio_server() as (read, write):
-        await server.run(read, write, initialization_options={})
+        init_opts = SimpleNamespace(
+            server_name="usd-mcp",
+            server_version=__version__,
+            website_url="https://github.com/your-org/usd-mcp",
+            icons=[],
+            instructions="Use the listed tools to open, inspect, and modify USD stages. Inputs and outputs are JSON.",
+            capabilities={
+                "tools": {}
+            }
+        )
+        await server.run(read, write, initialization_options=init_opts)
     return 0
 
 

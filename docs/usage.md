@@ -17,6 +17,8 @@ Client helper
   - This will be extended to invoke local tools in a future iteration.
 
 Examples
-- See `examples/minimal_read.py` and `examples/create_stage.py`.
+- See [../examples/minimal_read.py](../examples/minimal_read.py) and [../examples/create_stage.py](../examples/create_stage.py).
 
+
+Back: [Docs Index](README.md)
 

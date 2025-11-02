@@ -36,3 +36,8 @@ Notes
 - Wheels may be platform/py-version specific (cp3XY). If you switch Python, reinstall the matching wheel.
 
 
+Next steps
+- Continue to [Usage / Quickstart](usage.md)
+
+Back: [Docs Index](README.md)
+

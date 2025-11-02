@@ -8,6 +8,20 @@ Prereqs
 Start command
 - Use the dedicated MCP entry: `usd-mcp mcp-serve`
 
+WebSocket server (persistent sessions)
+- Start: `usd-mcp ws-serve --host 127.0.0.1 --port 8765`
+- Griptape configuration (WebSocket):
+
+```json
+{
+  "transport": "websocket",
+  "url": "ws://127.0.0.1:8765/ws"
+}
+```
+
+SSE (optional, if your stack expects SSE)
+- This server focuses on WebSocket and stdio; SSE may be added later.
+
 Griptape configuration (JSON)
 Paste this in the New MCP Server modal (Connection Type: Local Process (stdio)):
 
@@ -44,4 +58,6 @@ Notes
 - Ensure the absolute paths match your machine/venv.
 - If pxr is missing the server will respond with a `missing_usd` error; install `usd-core` in the same venv.
 
+
+Back: [Docs Index](README.md)
 

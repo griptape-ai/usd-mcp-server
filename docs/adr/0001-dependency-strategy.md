@@ -19,3 +19,5 @@ Consequences
 - Later work: build and publish a Docker image for zero-install usage.
 
 
+Back: [Docs Index](../README.md)
+

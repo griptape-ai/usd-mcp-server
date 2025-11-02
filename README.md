@@ -12,14 +12,19 @@ What you get in Milestone 1 (Tier 0):
 - Save/export USD files (basic)
 
 Docs and guides
-- Docs index: see `docs/README.md`
-- Installation: see `docs/installation.md`
-- Usage and quickstart: see `docs/usage.md`
-- Tool contracts (Tier 0): see `docs/tools/tier0.md`
-- Architecture decisions: see `docs/adr/`
+- Docs index: [Docs Index](docs/README.md)
+- Installation: [Installation](docs/installation.md)
+- Usage and quickstart: [Usage / Quickstart](docs/usage.md)
+- Tool contracts (Tier 0): [Tier 0 Tools](docs/tools/tier0.md)
+- Architecture decisions: [ADRs](docs/adr/)
+- MCP + Griptape setup: [MCP with Griptape](docs/mcp-griptape.md)
+- Sample NL prompts for Griptape: [Griptape Prompts](docs/griptape-prompts.md)
+- Test locally with Inspector: [MCP Inspector](docs/inspector.md)
 
 Examples
-- See `examples/` for `minimal_read.py` and `create_stage.py`
+- See [examples/](examples/) including:
+  - [minimal_read.py](examples/minimal_read.py)
+  - [create_stage.py](examples/create_stage.py)
 
 License
 - Apache-2.0. See `LICENSE`.

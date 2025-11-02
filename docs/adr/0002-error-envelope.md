@@ -15,3 +15,5 @@ Consequences
 - Details can include `path`, `stage_id`, or other contextual hints.
 
 
+Back: [Docs Index](../README.md)
+

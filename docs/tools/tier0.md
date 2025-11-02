@@ -51,3 +51,5 @@ Failure cases
 - `open_failed` / `save_failed` / `export_failed`: I/O errors.
 
 
+Back: [Tool Docs](README.md) · [Docs Index](../README.md)
+

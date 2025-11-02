@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "usd-mcp": {
+      "transport": "stdio",
+      "command": "/Users/kyleroche/Documents/Development/usd-mcp/.venv/bin/usd-mcp",
+      "args": ["mcp-serve"],
+      "env": { "PYTHONUNBUFFERED": "1" }
+    }
+  }
+}
+
+
