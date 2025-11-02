@@ -63,6 +63,8 @@ Tier 3 (variants, materials, cameras, bounds)
 - "If a variant set named modelVariant exists on /World/Cube, set its selection to 'high' and save; report the new selection."
 - "List materials in <path>, then bind the first material to /World/Cube and save; report /World/Cube's material binding."
 - "Unbind any materials on /World/Cube in <path> and save, then confirm binding is removed."
+ - Binding check (strict JSON final):
+   - "Return only a single JSON object with key material_path. No prose, no code fences, no extra keys. Steps: 1) Call getMaterialBindingFile with {\"path\":\"<path>\",\"prim_path\":\"/World/Cube\"}. 2) Output exactly {\"material_path\": <value from step 1.material_path>} only."
 - "List cameras in <path>. If none, create /World/Camera1 with focalLength=50 and horizontalAperture=36, save, then read its parameters."
 - "Compute the world-space bounding box for /World/Cube in <path> and return min/max."
 - Bounds (strict JSON final):

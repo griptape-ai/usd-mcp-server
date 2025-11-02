@@ -100,6 +100,11 @@ TOOLS: Dict[str, Any] = {
         {"type": "object", "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}}, "additionalProperties": True},
         "Stateless: unbind all materials and save.",
     ),
+    "get_material_binding_in_file": (
+        t3.tool_get_material_binding_in_file,
+        {"type": "object", "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}}, "additionalProperties": True},
+        "Stateless: get currently bound material (path or null) and binding rel info.",
+    ),
     # Cameras
     "list_cameras_in_file": (
         t3.tool_list_cameras_in_file,

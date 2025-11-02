@@ -1,13 +1,14 @@
 #usda 1.0
 (
     defaultPrim = "World"
+    doc = """Generated from Composed Stage of root layer /Users/kyleroche/Documents/Development/usd-mcp/samples/simple.usda
+"""
 )
 
 def Xform "World"
 {
     def Cube "Cube"
     {
-        rel material:binding = None
         color3f[] primvars:displayColor = [(1, 0, 0)]
         double size = 1.25
         token visibility = "invisible"
@@ -27,10 +28,6 @@ def Xform "World"
     }
 
     def Xform "TmpToDelete"
-    {
-    }
-
-    def Material "Mat1"
     {
     }
 }

@@ -127,6 +127,39 @@ def tool_unbind_material_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
     return _ok({"unbound": True})
 
 
+def tool_get_material_binding_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
+    Usd, _, _, _ = _import_pxr()
+    try:
+        from pxr import UsdShade  # type: ignore
+    except Exception:
+        return error_response("missing_usd", "UsdShade not available")
+    path = _normalize_file_path(params.get("path"))
+    prim_path: str = params.get("prim_path")
+    if not path or not prim_path:
+        return error_response("invalid_params", "'path','prim_path' required")
+    stage = Usd.Stage.Open(path)
+    if stage is None:
+        return error_response("open_failed", f"Failed to open stage: {path}")
+    prim = stage.GetPrimAtPath(prim_path)
+    if not prim:
+        return error_response("not_found", "prim not found")
+    mat = UsdShade.MaterialBindingAPI(prim).ComputeBoundMaterial()
+    if mat and mat.GetPrim().IsValid():
+        return _ok({"material_path": mat.GetPath().pathString})
+    # Also report if a binding relationship spec still exists but has no targets
+    rel = UsdShade.MaterialBindingAPI(prim).GetDirectBindingRel()
+    rel_exists = bool(rel) and rel.IsValid()
+    targets: List[str] = []
+    try:
+        if rel_exists:
+            tmp: List[Any] = []
+            rel.GetTargets(tmp)
+            targets = [t.pathString for t in tmp]
+    except Exception:
+        targets = []
+    return _ok({"material_path": None, "bindingRelExists": bool(rel_exists), "bindingTargets": targets})
+
+
 # Cameras
 def tool_list_cameras_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
     Usd, UsdGeom, _, _ = _import_pxr()
