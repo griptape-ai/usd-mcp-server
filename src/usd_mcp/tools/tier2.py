@@ -97,6 +97,12 @@ def tool_get_xform_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
         return error_response("not_found", f"Prim not found: {prim_path}")
 
     time_code = Usd.TimeCode.Default() if when == "default" else Usd.TimeCode(float(when))
+    # Ensure prim is Xform-typed if it's untyped, so xform ops can be authored
+    try:
+        if not prim.GetTypeName():
+            prim.SetTypeName("Xform")
+    except Exception:
+        pass
     xformable = UsdGeom.Xformable(prim)
     ops = []
     for op in xformable.GetOrderedXformOps():
@@ -113,6 +119,68 @@ def tool_get_xform_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
     cache = UsdGeom.XformCache(time_code)
     world = cache.GetLocalToWorldTransform(prim)
     local = cache.GetLocalTransformation(prim)
+
+    # Fallback: if world is identity but a transform op exists with a non-identity matrix,
+    # use that matrix as world (helps with edge cases in some USD builds)
+    def _is_identity(m) -> bool:
+        try:
+            for r in range(4):
+                for c in range(4):
+                    expected = 1.0 if r == c else 0.0
+                    if abs(float(m[r][c]) - expected) > 1e-12:
+                        return False
+            return True
+        except Exception:
+            return False
+
+    if _is_identity(world):
+        for op in xformable.GetOrderedXformOps():
+            if op.GetOpType() == UsdGeom.XformOp.TypeTransform:
+                try:
+                    tm = op.Get(time_code)
+                    if not _is_identity(tm):
+                        world = tm
+                        break
+                except Exception:
+                    pass
+
+    # Second fallback: accumulate authored transform ops up the ancestor chain
+    if _is_identity(world):
+        try:
+            from pxr import Gf  # type: ignore
+        except Exception:
+            Gf = None  # type: ignore
+
+        def _authored_transform_matrix(p):
+            xp = UsdGeom.Xformable(p)
+            for op in xp.GetOrderedXformOps():
+                if op.GetOpType() == UsdGeom.XformOp.TypeTransform:
+                    try:
+                        return op.Get(time_code)
+                    except Exception:
+                        return None
+            return None
+
+        chain: list = []
+        cur = prim
+        # Collect from root->...->prim
+        while cur and cur.IsValid() and str(cur.GetPath()) != "/":
+            chain.append(cur)
+            cur = cur.GetParent()
+        chain.reverse()
+
+        # Multiply parent-first: World = M_parent * ... * M_child
+        if Gf is not None:
+            acc = Gf.Matrix4d(1.0)
+            any_non_identity = False
+            for p in chain:
+                m = _authored_transform_matrix(p)
+                if m is not None:
+                    acc = acc * m
+                    if not _is_identity(m):
+                        any_non_identity = True
+            if any_non_identity:
+                world = acc
 
     def _m4_to_list(m) -> List[List[float]]:
         rows: List[List[float]] = []

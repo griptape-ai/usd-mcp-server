@@ -235,6 +235,10 @@ def tool_set_camera_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
 # Bounds
 def tool_get_bounds_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
     Usd, UsdGeom, _, _ = _import_pxr()
+    try:
+        from pxr import Gf  # type: ignore
+    except Exception:
+        Gf = None  # type: ignore
     path = _normalize_file_path(params.get("path"))
     prim_path: str = params.get("prim_path")
     when = params.get("time", "default")
@@ -248,10 +252,79 @@ def tool_get_bounds_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
         return error_response("not_found", f"Prim not found: {prim_path}")
     time_code = Usd.TimeCode.Default() if when == "default" else Usd.TimeCode(float(when))
     cache = UsdGeom.BBoxCache(time_code, [UsdGeom.Tokens.default_, UsdGeom.Tokens.render, UsdGeom.Tokens.proxy])
-    bbox = cache.ComputeWorldBound(prim)
-    box = bbox.GetBox()
-    mn = [float(x) for x in box.GetMin()]
-    mx = [float(x) for x in box.GetMax()]
+    # Try world bound first
+    bbox_world = cache.ComputeWorldBound(prim)
+    box_world = bbox_world.GetBox()
+    mn = [float(x) for x in box_world.GetMin()]
+    mx = [float(x) for x in box_world.GetMax()]
+
+    # Fallback translation fix for older USD builds: if parent translation is not applied, add it
+    def _is_identity3(m) -> bool:
+        try:
+            for r in range(3):
+                for c in range(3):
+                    exp = 1.0 if r == c else 0.0
+                    if abs(float(m[r][c]) - exp) > 1e-12:
+                        return False
+            return True
+        except Exception:
+            return True
+
+    # Try to compute authored world matrix via XformCache first
+    xf_cache = UsdGeom.XformCache(time_code)
+    world_m = xf_cache.GetLocalToWorldTransform(prim)
+    if Gf is not None and _is_identity3(world_m):
+        # Accumulate transform ops up the chain similar to get_xform_in_file fallback
+        def _authored_tm(p):
+            xp = UsdGeom.Xformable(p)
+            for op in xp.GetOrderedXformOps():
+                if op.GetOpType() == UsdGeom.XformOp.TypeTransform:
+                    try:
+                        return op.Get(time_code)
+                    except Exception:
+                        return None
+            return None
+
+        acc = Gf.Matrix4d(1.0)
+        cur = prim
+        non_id = False
+        chain = []
+        while cur and cur.IsValid() and str(cur.GetPath()) != "/":
+            chain.append(cur)
+            cur = cur.GetParent()
+        chain.reverse()
+        for p in chain:
+            m = _authored_tm(p)
+            if m is not None:
+                acc = acc * m
+                if not _is_identity3(m):
+                    non_id = True
+        if non_id:
+            world_m = acc
+
+    # Compute a transformed-local fallback world box using the authored/composed world matrix
+    try:
+        bbox_local = cache.ComputeLocalBound(prim)
+        if Gf is not None:
+            bbox_local = bbox_local.Transform(world_m)
+            lb = bbox_local.GetBox()
+            mn_alt = [float(x) for x in lb.GetMin()]
+            mx_alt = [float(x) for x in lb.GetMax()]
+        else:
+            mn_alt = mn
+            mx_alt = mx
+    except Exception:
+        mn_alt, mx_alt = mn, mx
+
+    # If the world box looks centered at origin but world_m has translation, prefer the transformed-local box
+    try:
+        t = [float(world_m[0][3]), float(world_m[1][3]), float(world_m[2][3])] if Gf is not None else [0.0, 0.0, 0.0]
+    except Exception:
+        t = [0.0, 0.0, 0.0]
+    center = [(mn[i] + mx[i]) * 0.5 for i in range(3)]
+    if any(abs(v) > 1e-12 for v in t) and all(abs(center[i]) < 1e-9 for i in range(3)):
+        mn, mx = mn_alt, mx_alt
+
     return _ok({"min": mn, "max": mx})
 
 

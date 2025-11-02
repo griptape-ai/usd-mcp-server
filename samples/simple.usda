@@ -5,10 +5,14 @@
 
 def Xform "World"
 {
-    def Cube "Cube"
+    def Cube "Cube" (
+        variants = {
+            string modelVariant = "high"
+        }
+    )
     {
         rel material:binding = None
-        color3f[] primvars:displayColor = [(1, 0, 0)]
+        color3f[] primvars:displayColor = [(0, 1, 0), (0, 0, 1)]
         double size = 1.25
         token visibility = "invisible"
         double3 xformOp:rotateXYZ = (45, 0, 0)
@@ -39,6 +43,12 @@ def Xform "World"
             {
             }
         }
+    }
+
+    def Camera "Camera1"
+    {
+        float2 clippingRange = (0.1, 1000)
+        token projection = "perspective"
     }
 }
 

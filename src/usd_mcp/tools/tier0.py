@@ -33,15 +33,26 @@ def _jsonify(value: Any) -> Any:
     path_str = getattr(value, "pathString", None)
     if isinstance(path_str, str):
         return path_str
-    # TfToken-like
+    # TfToken-like and Gf/Vt helpers
     try:
         from pxr import Tf, Gf, Vt  # type: ignore
 
+        # Tokens
         if isinstance(value, getattr(Tf, "Token", ())):
             return str(value)
-        # Common vectors
-        if isinstance(value, (getattr(Gf, "Vec3d", ()), getattr(Gf, "Vec3f", ()))):
-            return [float(value[0]), float(value[1]), float(value[2])]
+        # Vectors (2/3/4)
+        if isinstance(value, (getattr(Gf, "Vec2d", ()), getattr(Gf, "Vec2f", ()), getattr(Gf, "Vec3d", ()), getattr(Gf, "Vec3f", ()), getattr(Gf, "Vec4d", ()), getattr(Gf, "Vec4f", ()))):
+            try:
+                return [float(value[i]) for i in range(len(value))]
+            except Exception:
+                # Best-effort for partial implementations
+                return [float(v) for v in list(value)]
+        # Ranges (e.g., camera clippingRange)
+        if isinstance(value, (getattr(Gf, "Range1d", ()), getattr(Gf, "Range1f", ()))):
+            try:
+                return [float(value.GetMin()), float(value.GetMax())]
+            except Exception:
+                return [float(getattr(value, "min", 0.0)), float(getattr(value, "max", 0.0))]
         # Token arrays and other Vt arrays
         if isinstance(value, getattr(Vt, "Array", ())):
             try:
@@ -298,6 +309,15 @@ def tool_get_attribute_value(params: Dict[str, Any]) -> Dict[str, Any]:
     if not attr:
         return error_response("not_found", f"Attribute not found: {attr_name}")
     value = attr.Get() if when == "default" else attr.Get(float(when))
+    # Fix tuple-string artifacts (e.g., "[(0, 1, 0), (0, 0, 1)]") by parsing to JSON-safe arrays
+    try:
+        if isinstance(value, str) and value.startswith("[") and ("(" in value and ")" in value):
+            import ast  # lazy import
+            parsed = ast.literal_eval(value)
+            if isinstance(parsed, (list, tuple)):
+                value = [list(item) if isinstance(item, (list, tuple)) else item for item in parsed]
+    except Exception:
+        pass
     return _ok({"value": _jsonify(value)})
 
 
@@ -375,6 +395,15 @@ def tool_get_attribute_value_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
     if not attr:
         return error_response("not_found", f"Attribute not found: {attr_name}")
     value = attr.Get() if when == "default" else attr.Get(float(when))
+    # Fix tuple-string artifacts (e.g., "[(0, 1, 0), (0, 0, 1)]") by parsing to JSON-safe arrays
+    try:
+        if isinstance(value, str) and value.startswith("[") and ("(" in value and ")" in value):
+            import ast  # lazy import
+            parsed = ast.literal_eval(value)
+            if isinstance(parsed, (list, tuple)):
+                value = [list(item) if isinstance(item, (list, tuple)) else item for item in parsed]
+    except Exception:
+        pass
     return _ok({"value": _jsonify(value)})
 
 

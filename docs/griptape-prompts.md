@@ -25,6 +25,7 @@ Agent Rules
   - On “Tool name can only contain letters and numbers”, ensure tool names are camelCase without symbols.
 - Transforms
   - For setXformFile, prefer ops (translate, rotateXYZ in degrees, scale). Fallback to a 4×4 matrix when necessary.
+  - Ops input MUST be an array of entries: [{"op":"translate","value":[x,y,z]}]. Do not use a single dict.
   - Verify transforms by calling getXformFile and reading worldMatrix.
 - Attributes
   - Use getAttrFile/setAttrFile for reads/writes; use time: "default" unless a timeCode is requested.
@@ -71,6 +72,7 @@ Tier 3 (variants, materials, cameras, bounds)
   - "Return only a single JSON object with keys min and max. No prose, no code fences, no extra keys. Steps: 1) Call getBoundsFile with {\"path\":\"<path>\",\"prim_path\":\"/World/Cube\"}. 2) Output exactly the tool’s JSON result as the final message. Do not wrap or reformat it."
   - Example (copy/paste):
     - "Return only a single JSON object with keys min and max. No prose, no code fences, no extra keys. Steps: 1) Call getBoundsFile with {\"path\":\"/Users/kyleroche/Documents/Development/usd-mcp/samples/simple.usda\",\"prim_path\":\"/World/Cube\"}. 2) Output exactly the tool’s JSON result as the final message. Do not wrap or reformat it."
+  - Note: On some USD builds, BBoxCache may return centered world bounds under hierarchy. The server applies fallbacks; if bounds still appear centered, treat them as local-space extents and use getXformFile.worldMatrix for truth.
 - "Export <path> flattened to /tmp/flat.usda and export to USDZ /tmp/pack.usdz."
 
 Path robustness
