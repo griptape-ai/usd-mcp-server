@@ -11,6 +11,7 @@ from .version import __version__
 
 from .tools import tier0 as t0
 from .tools import tier2 as t2
+from .tools import tier3 as t3
 
 
 server = Server("usd-mcp")
@@ -71,6 +72,71 @@ TOOLS: Dict[str, Any] = {
         t0.tool_open_stage,
         {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": True},
         "Open a USD stage from a file path.",
+    ),
+    # Tier 3 - variants
+    "list_variants_in_file": (
+        t3.tool_list_variants_in_file,
+        {"type": "object", "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}}, "additionalProperties": True},
+        "Stateless: list variant sets and selections.",
+    ),
+    "set_variant_in_file": (
+        t3.tool_set_variant_in_file,
+        {"type": "object", "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}, "set": {"type": "string"}, "selection": {}}, "additionalProperties": True},
+        "Stateless: set variant selection and save.",
+    ),
+    # Materials
+    "list_materials_in_file": (
+        t3.tool_list_materials_in_file,
+        {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": True},
+        "Stateless: list UsdShade.Material prims.",
+    ),
+    "bind_material_in_file": (
+        t3.tool_bind_material_in_file,
+        {"type": "object", "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}, "material_path": {"type": "string"}}, "additionalProperties": True},
+        "Stateless: bind a material and save.",
+    ),
+    "unbind_material_in_file": (
+        t3.tool_unbind_material_in_file,
+        {"type": "object", "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}}, "additionalProperties": True},
+        "Stateless: unbind all materials and save.",
+    ),
+    # Cameras
+    "list_cameras_in_file": (
+        t3.tool_list_cameras_in_file,
+        {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": True},
+        "Stateless: list cameras.",
+    ),
+    "get_camera_in_file": (
+        t3.tool_get_camera_in_file,
+        {"type": "object", "properties": {"path": {"type": "string"}, "camera_path": {"type": "string"}}, "additionalProperties": True},
+        "Stateless: get camera parameters.",
+    ),
+    "set_camera_in_file": (
+        t3.tool_set_camera_in_file,
+        {"type": "object", "properties": {"path": {"type": "string"}, "camera_path": {"type": "string"}, "params": {}}, "additionalProperties": True},
+        "Stateless: set camera parameters and save.",
+    ),
+    # Bounds
+    "get_bounds_in_file": (
+        t3.tool_get_bounds_in_file,
+        {"type": "object", "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}, "time": {"type": ["string", "number"], "default": "default"}}, "additionalProperties": True},
+        "Stateless: compute world-space AABB.",
+    ),
+    # Export / Validate
+    "export_usd_file": (
+        t3.tool_export_usd_file,
+        {"type": "object", "properties": {"path": {"type": "string"}, "output_path": {"type": "string"}, "flatten": {"type": ["boolean", "null"]}}, "additionalProperties": True},
+        "Export to USD file (optionally flattened).",
+    ),
+    "export_usdz_file": (
+        t3.tool_export_usdz_file,
+        {"type": "object", "properties": {"path": {"type": "string"}, "output_path": {"type": "string"}}, "additionalProperties": True},
+        "Export to USDZ archive.",
+    ),
+    "validate_stage_file": (
+        t3.tool_validate_stage_file,
+        {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": True},
+        "Validate stage and return issues.",
     ),
     "summarize_file": (
         t0.tool_summarize_file,
@@ -321,6 +387,18 @@ _short_aliases = {
     "delete_prim_in_file": ["deletePrimFile"],
     "get_xform_in_file": ["getXformFile"],
     "set_xform_in_file": ["setXformFile"],
+    "list_variants_in_file": ["listVariantsFile"],
+    "set_variant_in_file": ["setVariantFile"],
+    "list_materials_in_file": ["listMaterialsFile"],
+    "bind_material_in_file": ["bindMaterialFile"],
+    "unbind_material_in_file": ["unbindMaterialFile"],
+    "list_cameras_in_file": ["listCamerasFile"],
+    "get_camera_in_file": ["getCameraFile"],
+    "set_camera_in_file": ["setCameraFile"],
+    "get_bounds_in_file": ["getBoundsFile"],
+    "export_usd_file": ["exportUsdFile"],
+    "export_usdz_file": ["exportUsdzFile"],
+    "validate_stage_file": ["validateStageFile"],
 }
 
 for _name, _alts in _short_aliases.items():

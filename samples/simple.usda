@@ -7,7 +7,8 @@ def Xform "World"
 {
     def Cube "Cube"
     {
-        double size = 1.5
+        color3f[] primvars:displayColor = [(1, 0, 0)]
+        double size = 1.25
         token visibility = "invisible"
         double3 xformOp:rotateXYZ = (45, 0, 0)
         matrix4d xformOp:transform = ( (0.5, 0, 0, 0), (0, 0.35355339, -0.35355339, 0), (0, 0.35355339, 0.35355339, 0), (0, 0, 0, 1) )
@@ -22,6 +23,10 @@ def Xform "World"
     {
         float focalLength = 50
         float horizontalAperture = 36
+    }
+
+    def Xform "TmpToDelete"
+    {
     }
 }
 
