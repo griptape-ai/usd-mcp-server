@@ -35,10 +35,19 @@ def _jsonify(value: Any) -> Any:
         return path_str
     # TfToken-like
     try:
-        from pxr import Tf  # type: ignore
+        from pxr import Tf, Gf, Vt  # type: ignore
 
-        if isinstance(value, getattr(Tf, "Token", ())):  # Tf.Token in some builds
+        if isinstance(value, getattr(Tf, "Token", ())):
             return str(value)
+        # Common vectors
+        if isinstance(value, (getattr(Gf, "Vec3d", ()), getattr(Gf, "Vec3f", ()))):
+            return [float(value[0]), float(value[1]), float(value[2])]
+        # Token arrays and other Vt arrays
+        if isinstance(value, getattr(Vt, "Array", ())):
+            try:
+                return [_jsonify(v) for v in value]
+            except Exception:
+                return [str(v) for v in value]
     except Exception:
         pass
     # Enums and others
@@ -289,7 +298,7 @@ def tool_get_attribute_value(params: Dict[str, Any]) -> Dict[str, Any]:
     if not attr:
         return error_response("not_found", f"Attribute not found: {attr_name}")
     value = attr.Get() if when == "default" else attr.Get(float(when))
-    return _ok({"value": value})
+    return _ok({"value": _jsonify(value)})
 
 
 def tool_set_attribute_value(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -366,7 +375,7 @@ def tool_get_attribute_value_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
     if not attr:
         return error_response("not_found", f"Attribute not found: {attr_name}")
     value = attr.Get() if when == "default" else attr.Get(float(when))
-    return _ok({"value": value})
+    return _ok({"value": _jsonify(value)})
 
 
 def tool_set_attribute_value_in_file(params: Dict[str, Any]) -> Dict[str, Any]:

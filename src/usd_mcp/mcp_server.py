@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from .version import __version__
 
 from .tools import tier0 as t0
+from .tools import tier2 as t2
 
 
 server = Server("usd-mcp")
@@ -228,6 +229,54 @@ TOOLS: Dict[str, Any] = {
         },
         "Save the stage (in-place or export to a new file).",
     ),
+    # Tier 2 - stateless authoring & transforms
+    "create_prim_in_file": (
+        t2.tool_create_prim_in_file,
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "prim_path": {"type": "string"},
+                "type_name": {"type": ["string", "null"]},
+                "specifier": {"type": ["string", "null"]}
+            },
+            "additionalProperties": True
+        },
+        "Stateless: create a prim and save.",
+    ),
+    "delete_prim_in_file": (
+        t2.tool_delete_prim_in_file,
+        {
+            "type": "object",
+            "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}},
+            "additionalProperties": True
+        },
+        "Stateless: delete a prim and save.",
+    ),
+    "get_xform_in_file": (
+        t2.tool_get_xform_in_file,
+        {
+            "type": "object",
+            "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}, "time": {"type": ["string", "number"], "default": "default"}},
+            "additionalProperties": True
+        },
+        "Stateless: get local/world matrices and xformOps.",
+    ),
+    "set_xform_in_file": (
+        t2.tool_set_xform_in_file,
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "prim_path": {"type": "string"},
+                "time": {"type": ["string", "number"], "default": "default"},
+                "ops": {"type": ["array", "null"]},
+                "matrix": {}
+            },
+            "additionalProperties": True
+        },
+        "Stateless: set xform via ops or 4x4 matrix and save.",
+    ),
 }
 
 
@@ -268,6 +317,10 @@ _short_aliases = {
     "get_prim_info_in_file": ["primInfoFile"],
     "get_attribute_value_in_file": ["getAttrFile"],
     "set_attribute_value_in_file": ["setAttrFile"],
+    "create_prim_in_file": ["createPrimFile"],
+    "delete_prim_in_file": ["deletePrimFile"],
+    "get_xform_in_file": ["getXformFile"],
+    "set_xform_in_file": ["setXformFile"],
 }
 
 for _name, _alts in _short_aliases.items():
