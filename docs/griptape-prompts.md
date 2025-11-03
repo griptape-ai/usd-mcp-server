@@ -28,10 +28,32 @@ Agent Rules
   - Ops input MUST be an array of entries: [{"op":"translate","value":[x,y,z]}]. Do not use a single dict.
   - Verify transforms by calling getXformFile and reading worldMatrix.
 - Attributes
-  - Use getAttrFile/setAttrFile for reads/writes; use time: "default" unless a timeCode is requested.
+  - Use getAttrFile/setAttrFile for single reads/writes; use time: "default" unless a timeCode is requested.
+  - When setting many attributes, prefer the batched writer setAttrsFile to stay under tool-call limits.
 - Serialization
   - Return numbers as numbers and vectors/matrices as JSON arrays; avoid tuples or stringified objects.
   - Never use parentheses for arrays (no tuples) – always use [ ... ] for JSON arrays.
+
+Layout (Describe → Build handoff)
+- Assume Z-up unless specified. If platform thickness is unknown, assume thickness = 2.0 so platform top Z = +1.0.
+- Report sizes as geometry (not transform scale): Sphere uses diameter; Cube uses edge length; Cone uses base diameter and height.
+- Ensure no overlaps: along X, separate centers by (widthA/2 + widthB/2 + margin) with margin = 0.5.
+- Rest on platform: set Z center = platformTop + (objectHeight/2).
+- Emit a machine-readable layout block the build agent can consume:
+```json
+{
+  "layout": {
+    "upAxis": "Z",
+    "platform": { "path": "/Floor/Platform", "thickness": 2.0, "topZ": 1.0 },
+    "margin": 0.5,
+    "objects": [
+      { "name": "Sphere", "type": "Sphere", "size": { "diameter": 3.0 }, "translate": [-5.0, 0.0, 2.5] },
+      { "name": "Cube",   "type": "Cube",   "size": { "edge": 3.0 },     "translate": [ 0.0, 0.0, 2.5] },
+      { "name": "Cone",   "type": "Cone",   "size": { "baseDiameter": 2.0, "height": 4.0 }, "translate": [ 5.0, 0.0, 3.0] }
+    ]
+  }
+}
+```
 
 Stateless (recommended for reliability)
 - "Summarize this USD file: <path>"
@@ -52,6 +74,24 @@ Attribute reads/writes (stateless write path available)
 - "Set /World/Cube.visibility to invisible in <path>, save, then read back /World/Cube.visibility."
  - Colors (strict JSON final):
    - "Return only a single JSON object with key displayColor. No prose, no code fences, no extra keys. Steps: 1) Call setAttrFile with {\"path\":\"<path>\",\"prim_path\":\"/World/Cube\",\"attr\":\"primvars:displayColor\",\"value\":[[1,0,0]],\"time\":\"default\"}. 2) Call getAttrFile with {\"path\":\"<path>\",\"prim_path\":\"/World/Cube\",\"attr\":\"primvars:displayColor\",\"time\":\"default\"}. 3) Output exactly {\"displayColor\": <value from step 2>} only."
+
+Batch attribute writes (preferred when >2 writes)
+- "Batch set these colors in <path> and save in a single call: /Floor=[1,1,1], /Floor/Sphere=[1,0,0], /Floor/Cube=[0.678,0.847,0.902], /Floor/Cone=[1,0.647,0]. Use setAttrsFile with items array, then return output_path and per-item status."
+- Example input (copy/paste into a tool block if needed):
+```json
+{
+  "path": "/Users/kyleroche/Documents/Development/usd-mcp/scene.usda",
+  "items": [
+    {"prim_path": "/Floor",        "attr": "primvars:displayColor", "value": [1,1,1]},
+    {"prim_path": "/Floor/Sphere", "attr": "primvars:displayColor", "value": [1,0,0]},
+    {"prim_path": "/Floor/Cube",   "attr": "primvars:displayColor", "value": [0.678,0.847,0.902]},
+    {"prim_path": "/Floor/Cone",   "attr": "primvars:displayColor", "value": [1,0.647,0]}
+  ]
+}
+```
+Notes:
+- Provide [r,g,b] for displayColor; the server coerces to [[r,g,b]].
+- You can mix different attrs in the same items array.
 
 Transforms (Tier 2)
 - Translate via ops: "Translate /World/Cube to [2, 0, 0] in <path>, save, then get the transform and show worldMatrix."

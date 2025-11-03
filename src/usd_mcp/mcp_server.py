@@ -47,6 +47,8 @@ def _normalize_args(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         "typeFilter": ["typeFilter", "type_filter", "Type Filter", "type"],
         "time": ["time", "Time"],
         "flatten": ["flatten", "Flatten"],
+        # Allow common variants for batch items, but DO NOT remap 'ops'
+        "items": ["items", "updates", "changes"],
     }
 
     fingerprint_to_canonical: Dict[str, str] = {}
@@ -118,7 +120,15 @@ TOOLS: Dict[str, Any] = {
     ),
     "set_camera_in_file": (
         t3.tool_set_camera_in_file,
-        {"type": "object", "properties": {"path": {"type": "string"}, "camera_path": {"type": "string"}, "params": {}}, "additionalProperties": True},
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "camera_path": {"type": "string"},
+                "params": {"type": "object", "additionalProperties": True}
+            },
+            "additionalProperties": True
+        },
         "Stateless: set camera parameters and save.",
     ),
     # Bounds
@@ -249,12 +259,38 @@ TOOLS: Dict[str, Any] = {
                 "path": {"type": "string"},
                 "prim_path": {"type": "string"},
                 "attr": {"type": "string"},
-                "value": {},
+                "value": {"type": ["string", "number", "boolean", "array", "object", "null"]},
                 "time": {"type": ["string", "number"], "default": "default"}
             },
             "additionalProperties": True
         },
         "Stateless: write an attribute value and save in place.",
+    ),
+    "batch_set_attributes_in_file": (
+        t0.tool_batch_set_attribute_values_in_file,
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "prim_path": {"type": "string"},
+                            "attr": {"type": "string"},
+                            "value": {"type": ["string", "number", "boolean", "array", "object", "null"]},
+                            "time": {"type": ["string", "number"]}
+                        },
+                        "required": ["prim_path", "attr"],
+                        "additionalProperties": True
+                    }
+                }
+            },
+            "required": ["path", "items"],
+            "additionalProperties": True
+        },
+        "Stateless: batch set attribute values and save once.",
     ),
     "set_attribute_value": (
         t0.tool_set_attribute_value,
@@ -264,7 +300,7 @@ TOOLS: Dict[str, Any] = {
                 "stage_id": {"type": "string"},
                 "prim_path": {"type": "string"},
                 "attr": {"type": "string"},
-                "value": {},
+                "value": {"type": ["string", "number", "boolean", "array", "object", "null"]},
                 "time": {"type": ["string", "number"], "default": "default"},
             },
             "required": ["stage_id", "prim_path", "attr", "value"],
@@ -342,7 +378,10 @@ TOOLS: Dict[str, Any] = {
                 "prim_path": {"type": "string"},
                 "time": {"type": ["string", "number"], "default": "default"},
                 "ops": {"type": ["array", "null"]},
-                "matrix": {}
+                "matrix": {
+                    "type": ["array", "null"],
+                    "items": {"type": "array", "items": {"type": "number"}}
+                }
             },
             "additionalProperties": True
         },
@@ -388,6 +427,7 @@ _short_aliases = {
     "get_prim_info_in_file": ["primInfoFile"],
     "get_attribute_value_in_file": ["getAttrFile"],
     "set_attribute_value_in_file": ["setAttrFile"],
+    "batch_set_attributes_in_file": ["setAttrsFile", "batchSetAttrsFile"],
     "create_prim_in_file": ["createPrimFile"],
     "delete_prim_in_file": ["deletePrimFile"],
     "get_xform_in_file": ["getXformFile"],

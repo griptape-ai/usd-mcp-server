@@ -208,13 +208,14 @@ def tool_get_xform_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def tool_set_xform_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
-    Usd, UsdGeom, _, _ = _import_pxr()
+    Usd, UsdGeom, Sdf, _ = _import_pxr()
     from pxr import Gf  # type: ignore
 
     path = _normalize_file_path(params.get("path"))
     prim_path: str = params.get("prim_path")
     when = params.get("time", "default")
-    ops: Optional[List[Dict[str, Any]]] = params.get("ops")
+    # Accept both 'ops' (preferred) and 'items' (fallback from some callers)
+    ops: Optional[List[Dict[str, Any]]] = params.get("ops") or params.get("items")
     matrix = params.get("matrix")
     if isinstance(prim_path, str):
         prim_path = prim_path.strip()
@@ -252,18 +253,13 @@ def tool_set_xform_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
                     m[r][c] = float(matrix[r][c])
         xf_op.Set(m, time_code)
     elif ops:
-        # If a transform op exists, edit its matrix directly for robustness
-        transform_op = None
-        for xop in xformable.GetOrderedXformOps():
-            if xop.GetOpType() == UsdGeom.XformOp.TypeTransform:
-                transform_op = xop
-                break
+        # Prefer XformCommonAPI to author translate/rotate/scale ops explicitly,
+        # and ensure xformOpOrder excludes stale TypeTransform entries.
+        xapi = UsdGeom.XformCommonAPI(prim)
 
-        def _ensure_transform_op():
-            nonlocal transform_op
-            if transform_op is None:
-                transform_op = xformable.AddXformOp(UsdGeom.XformOp.TypeTransform)
-            return transform_op
+        translate_val = None
+        scale_val = None
+        rotate_val = None
 
         for entry in ops:
             op_raw = entry.get("op") or entry.get("opType") or ""
@@ -272,51 +268,97 @@ def tool_set_xform_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
                 op = op.split(":", 1)[1]
             val = entry.get("value")
             if op in ("translate", "t") and isinstance(val, (list, tuple)):
-                to = _ensure_transform_op()
-                try:
-                    m = to.Get(time_code)
-                    if m is None:
-                        m = Gf.Matrix4d(1.0)
-                except Exception:
-                    m = Gf.Matrix4d(1.0)
-                m[0][3] = float(val[0])
-                m[1][3] = float(val[1])
-                m[2][3] = float(val[2])
-                to.Set(m, time_code)
+                translate_val = [float(val[0]), float(val[1]), float(val[2])]
             elif op in ("scale", "s") and isinstance(val, (list, tuple)):
-                to = _ensure_transform_op()
-                try:
-                    m = to.Get(time_code)
-                    if m is None:
-                        m = Gf.Matrix4d(1.0)
-                except Exception:
-                    m = Gf.Matrix4d(1.0)
-                m[0][0] = float(val[0])
-                m[1][1] = float(val[1])
-                m[2][2] = float(val[2])
-                to.Set(m, time_code)
+                scale_val = [float(val[0]), float(val[1]), float(val[2])]
             elif op in ("rotatexyz", "r") and isinstance(val, (list, tuple)):
-                to = _ensure_transform_op()
-                try:
-                    m = to.Get(time_code)
-                    if m is None:
-                        m = Gf.Matrix4d(1.0)
-                except Exception:
-                    m = Gf.Matrix4d(1.0)
-                rx, ry, rz = [float(v) for v in val]
-                Rx = Gf.Rotation(Gf.Vec3d(1, 0, 0), rx).GetMatrix()
-                Ry = Gf.Rotation(Gf.Vec3d(0, 1, 0), ry).GetMatrix()
-                Rz = Gf.Rotation(Gf.Vec3d(0, 0, 1), rz).GetMatrix()
-                R = Rz * Ry * Rx
-                # Preserve translation, replace upper-left 3x3
-                t = (m[0][3], m[1][3], m[2][3])
-                for r in range(3):
-                    for c in range(3):
-                        m[r][c] = R[r][c]
-                m[0][3], m[1][3], m[2][3] = t
-                to.Set(m, time_code)
+                rotate_val = [float(val[0]), float(val[1]), float(val[2])]
             else:
                 return error_response("invalid_params", f"Unsupported xform op: {op}")
+
+        # If authoring gprims, interpret scale as geometric size rather than xform scale.
+        prim_type = prim.GetTypeName() or ""
+        # Keep Cube as xform scale to support non-uniform scales (e.g., [10,10,1])
+        if scale_val is not None and prim_type in ("Sphere", "Cone"):
+            try:
+                if prim_type == "Sphere":
+                    # UsdGeom.Sphere uses 'radius'; interpret scale.x as diameter
+                    radius_attr = prim.GetAttribute("radius")
+                    if radius_attr:
+                        radius_attr.Set(float(scale_val[0]) * 0.5, time_code)
+                    scale_val = None
+                elif prim_type == "Cone":
+                    # UsdGeom.Cone uses 'height' and 'radius'; map scale.z -> height, scale.x -> diameter
+                    height_attr = prim.GetAttribute("height")
+                    radius_attr = prim.GetAttribute("radius")
+                    if height_attr:
+                        height_attr.Set(float(scale_val[2]), time_code)
+                    if radius_attr:
+                        radius_attr.Set(float(scale_val[0]) * 0.5, time_code)
+                    scale_val = None
+            except Exception:
+                # Fall back to xform scale if size authoring fails
+                pass
+
+        # If scaling a parent with children, move transform to an existing geometry child (prefer a child gprim),
+        # otherwise create one once. This avoids scaling siblings and prevents duplicate floor cubes.
+        if scale_val is not None:
+            try:
+                has_children = any(child for child in prim.GetChildren())
+            except Exception:
+                has_children = False
+            if has_children:
+                # Pick an existing child gprim if available (prefer a child named 'Geom'); otherwise create 'Geom' Cube
+                target_child = None
+                for child in prim.GetChildren():
+                    name = child.GetName()
+                    try:
+                        if name.lower() == "geom":
+                            target_child = child
+                            break
+                        gp = UsdGeom.Gprim(child)
+                        if bool(gp):
+                            target_child = child
+                    except Exception:
+                        continue
+                if target_child is None:
+                    try:
+                        target_child_path = f"{prim_path}/Geom"
+                        UsdGeom.Cube.Define(stage, Sdf.Path(target_child_path))
+                        target_child = stage.GetPrimAtPath(target_child_path)
+                    except Exception:
+                        target_child = None
+                if target_child and target_child.IsValid():
+                    xapi_p = UsdGeom.XformCommonAPI(target_child)
+                    xapi_p.SetScale(Gf.Vec3f(*scale_val), time_code)
+                    if translate_val is not None:
+                        xapi_p.SetTranslate(Gf.Vec3d(*translate_val), time_code)
+                        translate_val = None
+                    # Do not scale the parent; children will remain unflattened
+                    scale_val = None
+
+        # Apply via CommonAPI
+        if translate_val is not None:
+            xapi.SetTranslate(Gf.Vec3d(*translate_val), time_code)
+        if rotate_val is not None:
+            # Degrees, XYZ order
+            try:
+                from pxr import UsdGeom as _UG  # type: ignore
+                xapi.SetRotate(Gf.Vec3f(*rotate_val), _UG.XformCommonAPI.RotationOrderXYZ, time_code)
+            except Exception:
+                # Fallback without explicit order arg
+                try:
+                    xapi.SetRotate(Gf.Vec3f(*rotate_val))
+                except Exception:
+                    pass
+        if scale_val is not None:
+            xapi.SetScale(Gf.Vec3f(*scale_val), time_code)
+
+        # Rebuild op order without any existing TypeTransform ops
+        current_ops = [op for op in xformable.GetOrderedXformOps() if op.GetOpType() != UsdGeom.XformOp.TypeTransform]
+        # Ensure CommonAPI ops are present (they should be)
+        if current_ops:
+            xformable.SetXformOpOrder(current_ops)
     else:
         return error_response("invalid_params", "Provide either 'matrix' or 'ops'")
 

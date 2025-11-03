@@ -429,9 +429,21 @@ def tool_set_attribute_value_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
     prim = stage.GetPrimAtPath(prim_path)
     if not prim:
         return error_response("not_found", f"Prim not found: {prim_path}")
+    # Alias displayColor -> primvars:displayColor
+    if attr_name == "displayColor":
+        attr_name = "primvars:displayColor"
     attr = prim.GetAttribute(attr_name)
     if not attr:
         return error_response("not_found", f"Attribute not found: {attr_name}")
+    # Lightweight coercions for common attributes
+    try:
+        if attr_name == "primvars:displayColor":
+            # Expect VtArray<GfVec3f>; accept [r,g,b] and coerce to [[r,g,b]]
+            if isinstance(value, (list, tuple)) and (len(value) == 3) and all(isinstance(v, (int, float)) for v in value):
+                value = [list(map(float, value))]
+    except Exception:
+        pass
+
     ok = attr.Set(value) if when == "default" else attr.Set(value, float(when))
     if not ok:
         return error_response("set_failed", f"Failed to set attribute: {attr_name}")
@@ -440,6 +452,95 @@ def tool_set_attribute_value_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
     if not root.Save():
         return error_response("save_failed", "Failed to save after set")
     return _ok({"output_path": root.identifier})
+
+
+def tool_batch_set_attribute_values_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Stateless batch attribute writer to reduce tool-call pressure.
+
+    Input:
+      - path: string
+      - items: array of { prim_path: str, attr: str, value: any, time?: number|string }
+    """
+    Usd, UsdGeom, _, _ = _import_pxr()
+    path = _normalize_file_path(params.get("path"))
+    items = params.get("items") or []
+    if not path:
+        return error_response("invalid_params", "'path' is required")
+    if not isinstance(items, list) or not items:
+        return error_response("invalid_params", "'items' must be a non-empty array")
+    if not os.path.exists(path):
+        return error_response("not_found", f"File does not exist: {path}")
+
+    stage = Usd.Stage.Open(path)
+    if stage is None:
+        return error_response("open_failed", f"Failed to open stage: {path}")
+
+    results: List[Dict[str, Any]] = []
+
+    def _coerce(attr_name: str, val: Any) -> Any:
+        try:
+            if attr_name == "primvars:displayColor" or attr_name == "displayColor":
+                attr_name = "primvars:displayColor"
+                if isinstance(val, (list, tuple)) and len(val) == 3 and all(isinstance(v, (int, float)) for v in val):
+                    return [list(map(float, val))]
+        except Exception:
+            pass
+        return val
+
+    for item in items:
+        try:
+            prim_path = (item.get("prim_path") or "").strip()
+            attr_name = (item.get("attr") or "").strip()
+            value = item.get("value")
+            when = item.get("time", "default")
+            if not prim_path or not attr_name:
+                results.append({"prim_path": prim_path, "attr": attr_name, "ok": False, "error": "missing prim_path or attr"})
+                continue
+            prim = stage.GetPrimAtPath(prim_path)
+            if not prim:
+                results.append({"prim_path": prim_path, "attr": attr_name, "ok": False, "error": "prim not found"})
+                continue
+            # Handle transform shorthands via CommonAPI
+            if attr_name in ("xformOp:translate", "xformOp:scale"):
+                xapi = UsdGeom.XformCommonAPI(prim)
+                try:
+                    if attr_name.endswith("translate") and isinstance(value, (list, tuple)):
+                        vec = [float(value[0]), float(value[1]), float(value[2])]
+                        if when == "default":
+                            xapi.SetTranslate(Usd.TimeCode.Default(), UsdGeom.XformCommonAPI.OpTranslateXYZ, *vec)  # type: ignore
+                        else:
+                            xapi.SetTranslate(Usd.TimeCode(float(when)), UsdGeom.XformCommonAPI.OpTranslateXYZ, *vec)  # type: ignore
+                        results.append({"prim_path": prim_path, "attr": attr_name, "ok": True})
+                        continue
+                    if attr_name.endswith("scale") and isinstance(value, (list, tuple)):
+                        vec = [float(value[0]), float(value[1]), float(value[2])]
+                        if when == "default":
+                            xapi.SetScale(Usd.TimeCode.Default(), *vec)  # type: ignore
+                        else:
+                            xapi.SetScale(Usd.TimeCode(float(when)), *vec)  # type: ignore
+                        results.append({"prim_path": prim_path, "attr": attr_name, "ok": True})
+                        continue
+                except Exception as exc:
+                    results.append({"prim_path": prim_path, "attr": attr_name, "ok": False, "error": str(exc)})
+                    continue
+
+            attr = prim.GetAttribute(attr_name)
+            if not attr:
+                results.append({"prim_path": prim_path, "attr": attr_name, "ok": False, "error": "attribute not found"})
+                continue
+            value = _coerce(attr_name, value)
+            ok = attr.Set(value) if when == "default" else attr.Set(value, float(when))
+            if not ok:
+                results.append({"prim_path": prim_path, "attr": attr_name, "ok": False, "error": "set failed"})
+            else:
+                results.append({"prim_path": prim_path, "attr": attr_name, "ok": True})
+        except Exception as exc:
+            results.append({"prim_path": item.get("prim_path"), "attr": item.get("attr"), "ok": False, "error": str(exc)})
+
+    root = stage.GetRootLayer()
+    if not root.Save():
+        return error_response("save_failed", "Failed to save after batch set")
+    return _ok({"results": results, "output_path": root.identifier})
 
 
 def tool_create_stage(params: Dict[str, Any]) -> Dict[str, Any]:
