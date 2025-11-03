@@ -19,6 +19,7 @@ Docs and guides
 - Architecture decisions: [ADRs](docs/adr/)
 - MCP + Griptape setup: [MCP with Griptape](docs/mcp-griptape.md)
 - Sample NL prompts for Griptape: [Griptape Prompts](docs/griptape-prompts.md)
+  - Includes new composition flow via composeReferencedAssembly and batch reference helpers.
 - Test locally with Inspector: [MCP Inspector](docs/inspector.md)
 
 Examples

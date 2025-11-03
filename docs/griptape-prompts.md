@@ -10,6 +10,8 @@ Paths
 Agent Rules
 - Tool selection
   - Prefer stateless tools: summarizeFile, listPrimsFile, primInfoFile, getAttrFile, setAttrFile, createPrimFile, deletePrimFile, getXformFile, setXformFile, getBoundsFile.
+  - For composition/assembly, prefer composeReferencedAssembly (single call) or addReferencesBatchInFile.
+  - The older per-reference tools may be hidden; do not rely on addReferenceInFile/addSublayerInFile.
   - Avoid persistent stage_id flows unless explicitly requested; if needed, use openStage, listOpenStages, closeStage.
   - Use only alphanumeric tool names (camelCase) as advertised by the server.
 - Inputs
@@ -33,6 +35,20 @@ Agent Rules
 - Serialization
   - Return numbers as numbers and vectors/matrices as JSON arrays; avoid tuples or stringified objects.
   - Never use parentheses for arrays (no tuples) – always use [ ... ] for JSON arrays.
+
+Composition (preferred)
+- One‑shot compose with optional USDZ→USDA flatten, container root, and defaultPrim:
+  - "Execute one action and print only the tool’s JSON result. No prose. Call composeReferencedAssembly with: {\"output_path\":\"<assembly.usda>\",\"assets\":[{\"asset_path\":\"<a.usdz>\",\"name\":\"a\",\"internal_path\":\"/root/model\"},{\"asset_path\":\"<b.usdz>\",\"name\":\"b\",\"internal_path\":\"/root/model\"}],\"container_root\":\"/Assets\",\"flatten\":true,\"upAxis\":\"Z\",\"setDefaultPrim\":true,\"skipIfExists\":true}."
+- Notes:
+  - internal_path can be omitted; the server resolves it from the asset’s defaultPrim. Supplying "/root/model" explicitly makes viewers resolve predictably.
+  - composeReferencedAssembly is idempotent: it opens or creates stages, ensures container root, and sets defaultPrim when requested.
+
+Composition (fallback batch)
+- If composeReferencedAssembly is unavailable:
+  - exportUsdFile for each USDZ → USDA with { flatten:true, skipIfExists:true }
+  - createStage { upAxis:"Z" }
+  - addReferencesBatchInFile with items: [{ prim_path:"/Assets/<name>", asset_path:"<asset.usda>", internal_path:"/root/model" }, …]
+  - setDefaultPrimFile { prim_path:"/Assets" }
 
 Two‑agent flow (Describe → Build)
 - Container pattern: Represent each visible object with a container Xform and a geometry child named Geom. Apply translate/rotate on the container; apply size/scale on Geom. Children attach to the container (not to Geom).
