@@ -13,7 +13,8 @@ authors = [
   { name = "usd-mcp authors" }
 ]
 dependencies = [
-  "mcp>=0.1.0",
+    "mcp>=0.1.0",
+    "uvicorn[standard]>=0.27.0",
 ]
 
 [project.urls]
