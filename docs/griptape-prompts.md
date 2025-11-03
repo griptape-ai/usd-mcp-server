@@ -34,6 +34,36 @@ Agent Rules
   - Return numbers as numbers and vectors/matrices as JSON arrays; avoid tuples or stringified objects.
   - Never use parentheses for arrays (no tuples) – always use [ ... ] for JSON arrays.
 
+Two‑agent flow (Describe → Build)
+- Container pattern: Represent each visible object with a container Xform and a geometry child named Geom. Apply translate/rotate on the container; apply size/scale on Geom. Children attach to the container (not to Geom).
+- Dimensions vs scale (use dimensions in Describe):
+  - Sphere: diameter
+  - Cube: edge (uniform)
+  - Cone: baseDiameter and height
+  - Platform/Base: dimensions [width, depth, height]
+- Build mapping (how the builder should convert dimensions → USD):
+  - Sphere.diameter → /Sphere/Geom.radius = diameter/2
+  - Cube.edge → /Cube/Geom.size = edge (if you only have a 3-array, use xformOp:scale = array/2 on Geom)
+  - Cone.baseDiameter,height → /Cone/Geom.radius = baseDiameter/2; /Cone/Geom.height = height
+  - Platform.dimensions [W,D,H] → /Floor/Geom xformOp:scale = [W/2, D/2, H/2]; /Floor translate.z = H/2
+- Resting and spacing:
+  - Z-up world. platformTopZ = platform.height/2. For each object: centerZ = platformTopZ + (objectHeight/2).
+  - Side-by-side without overlap: along X, separate centers by (widthA/2 + widthB/2 + margin), margin = 0.5.
+- Colors:
+  - Use primvars:displayColor on Geom. Provide [r,g,b]. Server accepts displayColor or primvars:displayColor and coerces [r,g,b] → [[r,g,b]].
+
+Describe output contract (consumed by Build)
+```json
+{
+  "platform": { "name": "Floor", "dimensions": [10, 10, 1], "color": [1,1,1] },
+  "objects": [
+    { "name": "Sphere", "type": "Sphere", "diameter": 3, "translate": [-5, 0, 2.5], "color": [1,0.2,0.2] },
+    { "name": "Cube",   "type": "Cube",   "edge": 3,     "translate": [ 0, 0, 2.5], "color": [0.4,0.6,1] },
+    { "name": "Cone",   "type": "Cone",   "baseDiameter": 2, "height": 4, "translate": [ 5, 0, 3], "color": [1,0.6,0.3] }
+  ]
+}
+```
+
 Layout (Describe → Build handoff)
 - Assume Z-up unless specified. If platform thickness is unknown, assume thickness = 2.0 so platform top Z = +1.0.
 - Report sizes as geometry (not transform scale): Sphere uses diameter; Cube uses edge length; Cone uses base diameter and height.

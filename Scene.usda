@@ -10,85 +10,46 @@ def Xform "Floor"
 
     def Cube "Geom"
     {
-    }
-
-    def Cube "Platform"
-    {
-        float3 xformOp:scale = (10, 10, 1)
-        double3 xformOp:translate = (0, 0, 0.5)
-        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
-    }
-}
-
-def Xform "Cube"
-{
-    rel material:binding = </Looks/Blue>
-    double3 xformOp:translate = (0, 0, 2.5)
-    uniform token[] xformOpOrder = ["xformOp:translate"]
-
-    def Cube "Geom"
-    {
-    }
-
-    def Cube "Platform"
-    {
-        float3 xformOp:scale = (3, 3, 3)
-        double3 xformOp:translate = (0, 0, 2.5)
-        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        color3f[] primvars:displayColor = [(1, 1, 1)]
+        float3 xformOp:scale = (5, 5, 0.5)
+        uniform token[] xformOpOrder = ["xformOp:scale"]
     }
 }
 
 def Xform "Sphere"
 {
-    rel material:binding = </Looks/Red>
-    double3 xformOp:translate = (-5, 0, 2.5)
+    double3 xformOp:translate = (-3.5, 0, 2.5)
     uniform token[] xformOpOrder = ["xformOp:translate"]
 
     def Sphere "Geom"
     {
+        color3f[] primvars:displayColor = [(1, 0.2, 0.2)]
         double radius = 1.5
-    }
-
-    def Cube "Platform"
-    {
-        float3 xformOp:scale = (3, 3, 3)
-        double3 xformOp:translate = (-5, 0, 2.5)
-        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
     }
 }
 
 def Xform "Cone"
 {
-    rel material:binding = </Looks/Orange>
-    double3 xformOp:translate = (5, 0, 3)
+    double3 xformOp:translate = (4, 0, 3)
     uniform token[] xformOpOrder = ["xformOp:translate"]
 
     def Cone "Geom"
     {
         double height = 4
+        color3f[] primvars:displayColor = [(1, 0.6, 0.3)]
         double radius = 1
-    }
-
-    def Cube "Platform"
-    {
-        float3 xformOp:scale = (2, 2, 4)
-        double3 xformOp:translate = (5, 0, 3)
-        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
     }
 }
 
-def Scope "Looks"
+def Xform "Cube"
 {
-    def Material "Red"
-    {
-    }
+    double3 xformOp:translate = (0, 0, 2.5)
+    uniform token[] xformOpOrder = ["xformOp:translate"]
 
-    def Material "Blue"
+    def Cube "Geom"
     {
-    }
-
-    def Material "Orange"
-    {
+        color3f[] primvars:displayColor = [(0.4, 0.6, 1)]
+        double size = 3
     }
 }
 

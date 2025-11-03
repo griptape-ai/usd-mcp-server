@@ -491,6 +491,9 @@ def tool_batch_set_attribute_values_in_file(params: Dict[str, Any]) -> Dict[str,
         try:
             prim_path = (item.get("prim_path") or "").strip()
             attr_name = (item.get("attr") or "").strip()
+            # Alias common names
+            if attr_name == "displayColor":
+                attr_name = "primvars:displayColor"
             value = item.get("value")
             when = item.get("time", "default")
             if not prim_path or not attr_name:
@@ -501,35 +504,36 @@ def tool_batch_set_attribute_values_in_file(params: Dict[str, Any]) -> Dict[str,
                 results.append({"prim_path": prim_path, "attr": attr_name, "ok": False, "error": "prim not found"})
                 continue
             # Handle transform shorthands via CommonAPI
-            if attr_name in ("xformOp:translate", "xformOp:scale"):
+            if attr_name in ("xformOp:translate", "xformOp:scale") or (attr_name == "size" and isinstance(value, (list, tuple)) and len(value) == 3):
                 xapi = UsdGeom.XformCommonAPI(prim)
                 try:
+                    # Establish time code
+                    time_code = Usd.TimeCode.Default() if when == "default" else Usd.TimeCode(float(when))
+                    # size as 3-array -> treat as scale
+                    if attr_name == "size" and isinstance(value, (list, tuple)) and len(value) == 3:
+                        from pxr import Gf  # type: ignore
+                        vec3 = Gf.Vec3f(float(value[0]), float(value[1]), float(value[2]))
+                        xapi.SetScale(vec3, time_code)
+                        results.append({"prim_path": prim_path, "attr": "xformOp:scale", "ok": True})
+                        continue
                     if attr_name.endswith("translate") and isinstance(value, (list, tuple)):
-                        vec = [float(value[0]), float(value[1]), float(value[2])]
-                        if when == "default":
-                            xapi.SetTranslate(Usd.TimeCode.Default(), UsdGeom.XformCommonAPI.OpTranslateXYZ, *vec)  # type: ignore
-                        else:
-                            xapi.SetTranslate(Usd.TimeCode(float(when)), UsdGeom.XformCommonAPI.OpTranslateXYZ, *vec)  # type: ignore
+                        from pxr import Gf  # type: ignore
+                        vec = Gf.Vec3d(float(value[0]), float(value[1]), float(value[2]))
+                        xapi.SetTranslate(vec, time_code)
                         results.append({"prim_path": prim_path, "attr": attr_name, "ok": True})
                         continue
                     if attr_name.endswith("scale") and isinstance(value, (list, tuple)):
-                        vec = [float(value[0]), float(value[1]), float(value[2])]
-                        if when == "default":
-                            xapi.SetScale(Usd.TimeCode.Default(), *vec)  # type: ignore
-                        else:
-                            xapi.SetScale(Usd.TimeCode(float(when)), *vec)  # type: ignore
+                        from pxr import Gf  # type: ignore
+                        vec = Gf.Vec3f(float(value[0]), float(value[1]), float(value[2]))
+                        xapi.SetScale(vec, time_code)
                         results.append({"prim_path": prim_path, "attr": attr_name, "ok": True})
                         continue
                 except Exception as exc:
                     results.append({"prim_path": prim_path, "attr": attr_name, "ok": False, "error": str(exc)})
                     continue
 
-            attr = prim.GetAttribute(attr_name)
-            if not attr:
-                results.append({"prim_path": prim_path, "attr": attr_name, "ok": False, "error": "attribute not found"})
-                continue
             value = _coerce(attr_name, value)
-            ok = attr.Set(value) if when == "default" else attr.Set(value, float(when))
+            ok = prim.GetAttribute(attr_name).Set(value) if when == "default" else prim.GetAttribute(attr_name).Set(value, float(when))
             if not ok:
                 results.append({"prim_path": prim_path, "attr": attr_name, "ok": False, "error": "set failed"})
             else:
