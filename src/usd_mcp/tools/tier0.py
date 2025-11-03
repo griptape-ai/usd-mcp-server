@@ -557,15 +557,32 @@ def tool_create_stage(params: Dict[str, Any]) -> Dict[str, Any]:
     up_axis = params.get("upAxis")
     meters_per_unit = params.get("metersPerUnit")
 
-    stage = Usd.Stage.CreateNew(output_path)
-    if up_axis:
-        # Accept "Y" or "Z"
-        if str(up_axis).upper().startswith("Z"):
+    # Open-or-create semantics
+    try:
+        import os
+        exists = os.path.exists(output_path)
+    except Exception:
+        exists = False
+
+    if exists:
+        stage = Usd.Stage.Open(output_path)
+        if stage is None:
+            return error_response("open_failed", f"Failed to open stage: {output_path}")
+        # Apply upAxis only if explicitly provided
+        if up_axis:
+            if str(up_axis).upper().startswith("Z"):
+                UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+            else:
+                UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.y)
+    else:
+        stage = Usd.Stage.CreateNew(output_path)
+        # Default Z when not specified
+        if up_axis is None or str(up_axis).upper().startswith("Z"):
             UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
         else:
             UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.y)
-    if meters_per_unit:
-        UsdGeom.SetStageMetersPerUnit(stage, float(meters_per_unit))
+        if meters_per_unit:
+            UsdGeom.SetStageMetersPerUnit(stage, float(meters_per_unit))
 
     stage_id = STAGES.add(stage)
     return _ok({"stage_id": stage_id})

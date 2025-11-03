@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
+import os
 
 from ..errors import error_response
 from ..server import _import_pxr
@@ -334,8 +335,15 @@ def tool_export_usd_file(params: Dict[str, Any]) -> Dict[str, Any]:
     path = _normalize_file_path(params.get("path"))
     output_path: str = params.get("output_path")
     flatten: bool = bool(params.get("flatten", False))
+    skip_if_exists: bool = bool(params.get("skipIfExists", True))
     if not path or not output_path:
         return error_response("invalid_params", "'path' and 'output_path' required")
+    # Idempotent: skip when output exists and caller allows it
+    try:
+        if skip_if_exists and isinstance(output_path, str) and os.path.exists(output_path):
+            return _ok({"output_path": output_path, "skipped": True})
+    except Exception:
+        pass
     stage = Usd.Stage.Open(path)
     if stage is None:
         return error_response("open_failed", f"Failed to open stage: {path}")
@@ -495,4 +503,171 @@ def tool_set_default_prim_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
         return error_response("save_failed", "Failed to save after set_default_prim")
     return _ok({"defaultPrim": prim_path})
 
+
+# Batch: add many references in one call
+def tool_add_references_batch_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Add multiple references to a USD file in one save.
+
+    Inputs:
+      - path: target USD file
+      - items: array of { prim_path, asset_path, internal_path? }
+        - if internal_path omitted/empty or '/', resolve via referenced stage defaultPrim
+    """
+    Usd, _, _, _ = _import_pxr()
+    path: str = _normalize_file_path(params.get("path"))
+    items: List[Dict[str, Any]] = params.get("items") or []
+    if not path:
+        return error_response("invalid_params", "'path' is required")
+    if not isinstance(items, list) or not items:
+        return error_response("invalid_params", "'items' must be a non-empty array")
+    stage = Usd.Stage.Open(path)
+    if stage is None:
+        return error_response("open_failed", f"Failed to open stage: {path}")
+
+    results: List[Dict[str, Any]] = []
+    for it in items:
+        prim_path = (it.get("prim_path") or "").strip()
+        asset_path = _normalize_file_path(it.get("asset_path"))
+        internal_path = (it.get("internal_path") or "").strip()
+        if internal_path == "/":
+            internal_path = ""
+        if not prim_path or not asset_path:
+            results.append({"prim_path": prim_path, "ok": False, "error": "missing prim_path or asset_path"})
+            continue
+        prim = stage.GetPrimAtPath(prim_path)
+        if not prim:
+            prim = stage.DefinePrim(prim_path, "Xform")
+        # resolve defaultPrim when internal_path is empty
+        if internal_path == "":
+            try:
+                ref_stage = Usd.Stage.Open(asset_path)
+                if ref_stage:
+                    dp = ref_stage.GetDefaultPrim()
+                    if dp and dp.IsValid():
+                        internal_path = dp.GetPath().pathString
+            except Exception:
+                internal_path = ""
+        try:
+            if internal_path:
+                prim.GetReferences().AddReference(asset_path, internal_path)
+            else:
+                prim.GetReferences().AddReference(asset_path)
+            results.append({"prim_path": prim_path, "asset_path": asset_path, "internal_path": internal_path or None, "ok": True})
+        except Exception as exc:
+            results.append({"prim_path": prim_path, "asset_path": asset_path, "ok": False, "error": str(exc)})
+
+    root = stage.GetRootLayer()
+    if not root.Save():
+        return error_response("save_failed", "Failed to save after batch add references")
+    return _ok({"results": results})
+
+
+# One-shot assembly: export (optional), ensure stage/containers, add references, set defaultPrim
+def tool_compose_referenced_assembly(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Compose an assembly stage by referencing a list of assets.
+
+    Inputs:
+      - output_path: path to the assembly .usd/.usda to write
+      - assets: [{ asset_path, name?, internal_path? }]
+      - container_root: where to place containers (default '/Assets')
+      - flatten: bool, when asset_path is .usdz, export to sibling .usda first
+      - upAxis: 'Z' or 'Y' (default 'Z' on create)
+      - setDefaultPrim: bool (default true) — set to container_root
+      - skipIfExists: bool (default true) for intermediate exports
+    """
+    Usd, UsdGeom, _, _ = _import_pxr()
+    output_path: str = _normalize_file_path(params.get("output_path"))
+    assets: List[Dict[str, Any]] = params.get("assets") or []
+    container_root: str = params.get("container_root", "/Assets") or "/Assets"
+    flatten: bool = bool(params.get("flatten", True))
+    up_axis: Optional[str] = params.get("upAxis")
+    set_default: bool = bool(params.get("setDefaultPrim", True))
+    skip_if_exists: bool = bool(params.get("skipIfExists", True))
+    if not output_path:
+        return error_response("invalid_params", "'output_path' is required")
+    if not isinstance(assets, list) or not assets:
+        return error_response("invalid_params", "'assets' must be a non-empty array")
+
+    # Open-or-create stage
+    stage = None
+    if os.path.exists(output_path):
+        stage = Usd.Stage.Open(output_path)
+    else:
+        stage = Usd.Stage.CreateNew(output_path)
+        # default Z when not specified
+        if up_axis is None or str(up_axis).upper().startswith("Z"):
+            UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+        else:
+            UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.y)
+
+    # Ensure container root
+    stage.DefinePrim(container_root, "Xform")
+
+    def _basename_noext(p: str) -> str:
+        base = os.path.basename(p)
+        name, _ = os.path.splitext(base)
+        return name
+
+    referenced = 0
+    for a in assets:
+        src_path = _normalize_file_path(a.get("asset_path"))
+        if not src_path:
+            continue
+        name = (a.get("name") or _basename_noext(src_path)).strip() or _basename_noext(src_path)
+        internal_path = (a.get("internal_path") or "").strip()
+
+        # Optionally export USDZ -> USDA sibling
+        ref_path = src_path
+        try:
+            if flatten and str(src_path).lower().endswith(".usdz"):
+                target = os.path.splitext(src_path)[0] + ".usda"
+                if not (skip_if_exists and os.path.exists(target)):
+                    st = Usd.Stage.Open(src_path)
+                    if st is None:
+                        return error_response("open_failed", f"Failed to open asset: {src_path}")
+                    ok = st.Export(target)
+                    if not ok:
+                        return error_response("export_failed", f"Failed to export {target}")
+                ref_path = target
+        except Exception as exc:
+            return error_response("export_failed", str(exc))
+
+        # Resolve defaultPrim if internal_path empty
+        if internal_path == "" or internal_path == "/":
+            try:
+                rstage = Usd.Stage.Open(ref_path)
+                if rstage:
+                    dp = rstage.GetDefaultPrim()
+                    if dp and dp.IsValid():
+                        internal_path = dp.GetPath().pathString
+                    else:
+                        internal_path = ""
+            except Exception:
+                internal_path = ""
+
+        container = container_root.rstrip("/") + "/" + name
+        prim = stage.GetPrimAtPath(container)
+        if not prim:
+            prim = stage.DefinePrim(container, "Xform")
+        try:
+            if internal_path:
+                prim.GetReferences().AddReference(ref_path, internal_path)
+            else:
+                prim.GetReferences().AddReference(ref_path)
+            referenced += 1
+        except Exception as exc:
+            return error_response("reference_failed", str(exc))
+
+    if set_default:
+        try:
+            prim = stage.GetPrimAtPath(container_root)
+            if prim:
+                stage.SetDefaultPrim(prim)
+        except Exception:
+            pass
+
+    root = stage.GetRootLayer()
+    if not root.Save():
+        return error_response("save_failed", "Failed to save compose")
+    return _ok({"combined_path": output_path, "referenced": referenced})
 

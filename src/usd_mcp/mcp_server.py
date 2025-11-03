@@ -140,8 +140,8 @@ TOOLS: Dict[str, Any] = {
     # Export / Validate
     "export_usd_file": (
         t3.tool_export_usd_file,
-        {"type": "object", "properties": {"path": {"type": "string"}, "output_path": {"type": "string"}, "flatten": {"type": ["boolean", "null"]}}, "additionalProperties": True},
-        "Export to USD file (optionally flattened).",
+        {"type": "object", "properties": {"path": {"type": "string"}, "output_path": {"type": "string"}, "flatten": {"type": ["boolean", "null"]}, "skipIfExists": {"type": ["boolean", "null"]}}, "additionalProperties": True},
+        "Export to USD file (optionally flattened). If skipIfExists is true and output exists, returns {skipped:true}.",
     ),
     "export_usdz_file": (
         t3.tool_export_usdz_file,
@@ -180,6 +180,74 @@ TOOLS: Dict[str, Any] = {
             "additionalProperties": True
         },
         "Append or insert a sublayer into the root layer and save.",
+    ),
+    "set_default_prim_in_file": (
+        t3.tool_set_default_prim_in_file,
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "prim_path": {"type": "string"}
+            },
+            "required": ["path", "prim_path"],
+            "additionalProperties": True
+        },
+        "Set stage defaultPrim to an existing prim path and save.",
+    ),
+    "add_references_batch_in_file": (
+        t3.tool_add_references_batch_in_file,
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "prim_path": {"type": "string"},
+                            "asset_path": {"type": "string"},
+                            "internal_path": {"type": ["string", "null"]}
+                        },
+                        "required": ["prim_path", "asset_path"],
+                        "additionalProperties": True
+                    }
+                }
+            },
+            "required": ["path", "items"],
+            "additionalProperties": True
+        },
+        "Batch: add multiple references and save once.",
+    ),
+    "compose_referenced_assembly": (
+        t3.tool_compose_referenced_assembly,
+        {
+            "type": "object",
+            "properties": {
+                "output_path": {"type": "string"},
+                "assets": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "asset_path": {"type": "string"},
+                            "name": {"type": ["string", "null"]},
+                            "internal_path": {"type": ["string", "null"]}
+                        },
+                        "required": ["asset_path"],
+                        "additionalProperties": True
+                    }
+                },
+                "container_root": {"type": ["string", "null"]},
+                "flatten": {"type": ["boolean", "null"]},
+                "upAxis": {"type": ["string", "null"]},
+                "setDefaultPrim": {"type": ["boolean", "null"]},
+                "skipIfExists": {"type": ["boolean", "null"]}
+            },
+            "required": ["output_path", "assets"],
+            "additionalProperties": True
+        },
+        "Compose an assembly by ensuring stage and adding references under a container root; resolves defaultPrim for internal paths and optionally flattens USDZ to USDA.",
     ),
     "summarize_file": (
         t0.tool_summarize_file,
@@ -474,6 +542,9 @@ _short_aliases = {
     "validate_stage_file": ["validateStageFile"],
     "add_reference_in_file": ["addReferenceInFile"],
     "add_sublayer_in_file": ["addSublayerInFile"],
+    "set_default_prim_in_file": ["setDefaultPrimFile"],
+    "add_references_batch_in_file": ["addReferencesBatchInFile"],
+    "compose_referenced_assembly": ["composeReferencedAssembly"],
 }
 
 for _name, _alts in _short_aliases.items():
