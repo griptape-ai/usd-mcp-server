@@ -554,6 +554,17 @@ for _name, _alts in _short_aliases.items():
             if _alias not in TOOLS:
                 TOOLS[_alias] = (_handler, _schema, f"{_desc} (alias)")
 
+# Optionally disable older composition tools to reduce agent confusion
+_DISABLED_NAMES = {
+    "add_reference_in_file",
+    "addReferenceInFile",
+    "add_sublayer_in_file",
+    "addSublayerInFile",
+}
+for _n in list(TOOLS.keys()):
+    if _n in _DISABLED_NAMES:
+        TOOLS.pop(_n, None)
+
 
 @server.list_tools()
 async def _list_tools() -> List[Tool]:
