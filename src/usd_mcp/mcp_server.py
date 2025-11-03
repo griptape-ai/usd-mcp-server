@@ -153,6 +153,34 @@ TOOLS: Dict[str, Any] = {
         {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": True},
         "Validate stage and return issues.",
     ),
+    # Composition helpers
+    "add_reference_in_file": (
+        t3.tool_add_reference_in_file,
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "prim_path": {"type": "string"},
+                "asset_path": {"type": "string"},
+                "internal_path": {"type": ["string", "null"]}
+            },
+            "additionalProperties": True
+        },
+        "Add a reference to a prim and save.",
+    ),
+    "add_sublayer_in_file": (
+        t3.tool_add_sublayer_in_file,
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "sublayer": {"type": "string"},
+                "insert_index": {"type": ["integer", "string", "null"]}
+            },
+            "additionalProperties": True
+        },
+        "Append or insert a sublayer into the root layer and save.",
+    ),
     "summarize_file": (
         t0.tool_summarize_file,
         {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": True},
@@ -444,6 +472,8 @@ _short_aliases = {
     "export_usd_file": ["exportUsdFile"],
     "export_usdz_file": ["exportUsdzFile"],
     "validate_stage_file": ["validateStageFile"],
+    "add_reference_in_file": ["addReferenceInFile"],
+    "add_sublayer_in_file": ["addSublayerInFile"],
 }
 
 for _name, _alts in _short_aliases.items():

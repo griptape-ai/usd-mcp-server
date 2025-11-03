@@ -1,0 +1,30 @@
+Build referenced assembly (non-streaming). Use camelCase tool names. Flat JSON only (no nested values). Execute one action at a time and print only each tool’s JSON result. No prose.
+
+Steps:
+1) Ensure flattened USDs (ignore error if they already exist):
+- exportUsdFile {"path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/rodin_3d_1762197617.usdz","output_path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/rodin_3d_1762197617.usda","flatten":true}
+- exportUsdFile {"path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/rodin_3d_1762197705.usdz","output_path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/rodin_3d_1762197705.usda","flatten":true}
+- exportUsdFile {"path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/rodin_3d_1762197796.usdz","output_path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/rodin_3d_1762197796.usda","flatten":true}
+- exportUsdFile {"path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/rodin_3d_1762197982.usdz","output_path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/rodin_3d_1762197982.usda","flatten":true}
+- exportUsdFile {"path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/rodin_3d_1762198073.usdz","output_path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/rodin_3d_1762198073.usda","flatten":true}
+
+2) Ensure stage (ignore error if it exists):
+- createStage {"output_path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/combined.usda","upAxis":"Z"}
+
+3) Ensure containers (ignore exists):
+- createPrimFile {"path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/combined.usda","prim_path":"/Assets","type_name":"Xform"}
+- createPrimFile {"path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/combined.usda","prim_path":"/Assets/rodin_3d_1762197617","type_name":"Xform"}
+- createPrimFile {"path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/combined.usda","prim_path":"/Assets/rodin_3d_1762197705","type_name":"Xform"}
+- createPrimFile {"path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/combined.usda","prim_path":"/Assets/rodin_3d_1762197796","type_name":"Xform"}
+- createPrimFile {"path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/combined.usda","prim_path":"/Assets/rodin_3d_1762197982","type_name":"Xform"}
+- createPrimFile {"path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/combined.usda","prim_path":"/Assets/rodin_3d_1762198073","type_name":"Xform"}
+
+4) Add references with explicit internal_path "/root/model":
+- addReferenceInFile {"path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/combined.usda","prim_path":"/Assets/rodin_3d_1762197617","asset_path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/rodin_3d_1762197617.usda","internal_path":"/root/model"}
+- addReferenceInFile {"path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/combined.usda","prim_path":"/Assets/rodin_3d_1762197705","asset_path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/rodin_3d_1762197705.usda","internal_path":"/root/model"}
+- addReferenceInFile {"path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/combined.usda","prim_path":"/Assets/rodin_3d_1762197796","asset_path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/rodin_3d_1762197796.usda","internal_path":"/root/model"}
+- addReferenceInFile {"path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/combined.usda","prim_path":"/Assets/rodin_3d_1762197982","asset_path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/rodin_3d_1762197982.usda","internal_path":"/root/model"}
+- addReferenceInFile {"path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/combined.usda","prim_path":"/Assets/rodin_3d_1762198073","asset_path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/rodin_3d_1762198073.usda","internal_path":"/root/model"}
+
+5) Final strict JSON only:
+{"combined_path":"/Users/kyleroche/Documents/Development/usd-mcp/samples/test/combined.usda","referenced":5}

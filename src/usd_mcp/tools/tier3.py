@@ -385,3 +385,114 @@ def tool_validate_stage_file(params: Dict[str, Any]) -> Dict[str, Any]:
         return error_response("validate_failed", str(exc))
 
 
+def tool_add_reference_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Add a reference to a prim in a USD file and save.
+
+    Inputs:
+      - path: path to the target USD file (stage to modify)
+      - prim_path: prim on that stage that will receive the reference
+      - asset_path: path to the referenced USD/USDZ/USDA
+      - internal_path: optional prim path inside the referenced asset (default: use asset's defaultPrim if present)
+    """
+    Usd, _, _, _ = _import_pxr()
+    path: str = _normalize_file_path(params.get("path"))
+    prim_path: str = params.get("prim_path") or ""
+    asset_path: str = _normalize_file_path(params.get("asset_path"))
+    internal_path_in = params.get("internal_path")
+    internal_path: str = (internal_path_in or "").strip()
+    # Treat '/' as empty; we'll resolve to defaultPrim if possible
+    if internal_path == "/":
+        internal_path = ""
+    if not path or not prim_path or not asset_path:
+        return error_response("invalid_params", "'path', 'prim_path', 'asset_path' are required")
+    stage = Usd.Stage.Open(path)
+    if stage is None:
+        return error_response("open_failed", f"Failed to open stage: {path}")
+    prim = stage.GetPrimAtPath(prim_path)
+    if not prim:
+        return error_response("not_found", f"Prim not found: {prim_path}")
+    # If no internal prim path provided, try the asset's defaultPrim
+    if internal_path == "":
+        try:
+            ref_stage = Usd.Stage.Open(asset_path)
+            if ref_stage:
+                dp = ref_stage.GetDefaultPrim()
+                if dp and dp.IsValid():
+                    internal_path = dp.GetPath().pathString
+        except Exception:
+            # fallback: keep empty
+            internal_path = ""
+    try:
+        if internal_path:
+            prim.GetReferences().AddReference(asset_path, internal_path)
+        else:
+            prim.GetReferences().AddReference(asset_path)
+    except Exception as exc:
+        return error_response("reference_failed", str(exc))
+    root = stage.GetRootLayer()
+    if not root.Save():
+        return error_response("save_failed", "Failed to save after add_reference")
+    return _ok({"prim_path": prim_path, "asset_path": asset_path, "internal_path": internal_path or None})
+
+
+def tool_add_sublayer_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Add a sublayer to the root layer of a USD file and save.
+
+    Inputs:
+      - path: target USD file
+      - sublayer: path to a USD layer to append in subLayerPaths
+      - insert_index: optional index to insert at (append by default)
+    """
+    Usd, _, _, _ = _import_pxr()
+    path: str = _normalize_file_path(params.get("path"))
+    sublayer: str = _normalize_file_path(params.get("sublayer"))
+    insert_index = params.get("insert_index")
+    if not path or not sublayer:
+        return error_response("invalid_params", "'path' and 'sublayer' are required")
+    stage = Usd.Stage.Open(path)
+    if stage is None:
+        return error_response("open_failed", f"Failed to open stage: {path}")
+    root = stage.GetRootLayer()
+    try:
+        if insert_index is None or insert_index == "append":
+            if sublayer not in root.subLayerPaths:
+                root.subLayerPaths.append(sublayer)
+        else:
+            idx = int(insert_index)
+            if sublayer not in root.subLayerPaths:
+                root.subLayerPaths.insert(idx, sublayer)
+    except Exception as exc:
+        return error_response("sublayer_failed", str(exc))
+    if not root.Save():
+        return error_response("save_failed", "Failed to save after add_sublayer")
+    return _ok({"sublayers": list(root.subLayerPaths)})
+
+
+def tool_set_default_prim_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Set the stage defaultPrim to the given prim path and save.
+
+    Inputs:
+      - path: target USD file
+      - prim_path: absolute prim path to set as defaultPrim (must exist)
+    """
+    Usd, _, _, _ = _import_pxr()
+    path: str = _normalize_file_path(params.get("path"))
+    prim_path: str = params.get("prim_path") or ""
+    if not path or not prim_path:
+        return error_response("invalid_params", "'path' and 'prim_path' are required")
+    stage = Usd.Stage.Open(path)
+    if stage is None:
+        return error_response("open_failed", f"Failed to open stage: {path}")
+    prim = stage.GetPrimAtPath(prim_path)
+    if not prim:
+        return error_response("not_found", f"Prim not found: {prim_path}")
+    try:
+        stage.SetDefaultPrim(prim)
+    except Exception as exc:
+        return error_response("set_failed", str(exc))
+    root = stage.GetRootLayer()
+    if not root.Save():
+        return error_response("save_failed", "Failed to save after set_default_prim")
+    return _ok({"defaultPrim": prim_path})
+
+
