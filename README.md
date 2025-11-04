@@ -3,13 +3,19 @@ usd-mcp
 
 Model Context Protocol (MCP) server for interacting with Pixar USD (Universal Scene Description) files using clean, single-action tools ideal for LLM orchestration.
 
-What you get in Milestone 1 (Tier 0):
-- Install with host `pxr`
-- Open/close stages, list stages
-- Inspect stages and prims
-- Get/set attribute values
-- Create new stages from scratch
-- Save/export USD files (basic)
+Features
+- Stage management: open/close, list, summarize (stateful) and stateless file helpers.
+- File inspection: summarizeFile, listPrimsFile, primInfoFile, getAttrFile.
+- Attribute writes: setAttrFile and batch set via setAttrsFile (aliases displayColor→primvars:displayColor, coerces [r,g,b]→[[r,g,b]]).
+- Prim authoring: createPrimFile, deletePrimFile.
+- Transforms: getXformFile, setXformFile (CommonAPI ops; strips TypeTransform; smart parent/child scaling; gprim size handling).
+- Composition: composeReferencedAssembly (one‑shot), addReferencesBatchInFile, setDefaultPrimFile.
+- Variants: listVariantsFile, setVariantFile.
+- Materials: listMaterialsFile, bindMaterialFile, unbindMaterialFile, getMaterialBindingFile.
+- Cameras: listCamerasFile, getCameraFile, setCameraFile.
+- Bounds: getBoundsFile (world AABB with fallbacks).
+- Export: exportUsdFile (flatten, skipIfExists), exportUsdzFile.
+- Ergonomics: camelCase tool aliases; argument normalization (flat JSON, tolerant keys); createStage is open‑or‑create, default upAxis Z.
 
 Docs and guides
 - Docs index: [Docs Index](docs/README.md)
@@ -31,7 +37,7 @@ License
 - Apache-2.0. See `LICENSE`.
 
 Status
-- Milestone 1 (Tier 0) in progress. Later tiers include composition (layers/refs), authoring utilities, materials/cameras, and USDZ export + validation.
+- Active development. See Features above for what’s available now.
 
 Quick install
 - Create venv, install package, then install USD wheels if available:
