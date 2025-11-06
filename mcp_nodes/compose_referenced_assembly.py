@@ -44,6 +44,7 @@ class ComposeReferencedAssemblyNode(SuccessFailureNode):
         self.add_parameter(Parameter(name="upAxis", input_types=["str"], type="str", default_value="Z"))
         self.add_parameter(Parameter(name="setDefaultPrim", input_types=["bool"], type="bool", default_value=True))
         self.add_parameter(Parameter(name="skipIfExists", input_types=["bool"], type="bool", default_value=True))
+        self.add_parameter(Parameter(name="clearExisting", input_types=["bool"], type="bool", default_value=False))
 
         self.output_combined_path = Parameter(
             name="combined_path",
@@ -83,6 +84,7 @@ class ComposeReferencedAssemblyNode(SuccessFailureNode):
             upAxis: str = self.get_parameter_value("upAxis")
             setDefaultPrim: bool = bool(self.get_parameter_value("setDefaultPrim"))
             skipIfExists: bool = bool(self.get_parameter_value("skipIfExists"))
+            clearExisting: bool = bool(self.get_parameter_value("clearExisting"))
 
             result = core.compose_referenced_assembly(
                 output_path=output_path,
@@ -92,6 +94,7 @@ class ComposeReferencedAssemblyNode(SuccessFailureNode):
                 upAxis=upAxis,
                 setDefaultPrim=setDefaultPrim,
                 skipIfExists=skipIfExists,
+                clearExisting=clearExisting,
             )
             self.publish_update_to_parameter("combined_path", result.get("combined_path", ""))
             self.publish_update_to_parameter("referenced", int(result.get("referenced", 0)))

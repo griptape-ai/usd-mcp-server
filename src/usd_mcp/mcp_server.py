@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any, Dict, List
+
+import anyio
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
-import anyio
-from types import SimpleNamespace
-from .version import __version__
 
 from .tools import tier0 as t0
 from .tools import tier2 as t2
 from .tools import tier3 as t3
-
+from .version import __version__
 
 server = Server("usd-mcp")
 
@@ -31,7 +31,11 @@ def _normalize_args(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             args = {}
 
     # Unwrap common wrappers like {"values": {...}} potentially nested
-    while isinstance(args, dict) and set(args.keys()) == {"values"} and isinstance(args.get("values"), dict):
+    while (
+        isinstance(args, dict)
+        and set(args.keys()) == {"values"}
+        and isinstance(args.get("values"), dict)
+    ):
         args = args["values"]
 
     def key_fingerprint(key: str) -> str:
@@ -47,6 +51,7 @@ def _normalize_args(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         "typeFilter": ["typeFilter", "type_filter", "Type Filter", "type"],
         "time": ["time", "Time"],
         "flatten": ["flatten", "Flatten"],
+        "clearExisting": ["clearExisting", "clear_existing", "Clear Existing"],
         # Allow common variants for batch items, but DO NOT remap 'ops'
         "items": ["items", "updates", "changes"],
     }
@@ -72,81 +77,98 @@ def _normalize_args(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
 TOOLS: Dict[str, Any] = {
     "open_stage": (
         t0.tool_open_stage,
-        {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": True},
+        {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "additionalProperties": True,
+        },
         "Open a USD stage from a file path.",
     ),
     # Tier 3 - variants
     "list_variants_in_file": (
         t3.tool_list_variants_in_file,
-        {"type": "object", "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}}, "additionalProperties": True},
-        "Stateless: list variant sets and selections. Flat JSON only (no 'values' wrapper).",
+        {
+            "type": "object",
+            "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}},
+            "additionalProperties": True,
+        },
+        "Stateless: list variant sets and selections.",
     ),
     "set_variant_in_file": (
         t3.tool_set_variant_in_file,
-        {"type": "object", "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}, "set": {"type": "string"}, "selection": {}}, "additionalProperties": True},
-        "Stateless: set variant selection (does not create variants). Use authorVariantsInFile to create/update variants. Flat JSON only.",
-    ),
-    "author_variants_in_file": (
-        t3.tool_author_variants_in_file,
         {
             "type": "object",
             "properties": {
                 "path": {"type": "string"},
                 "prim_path": {"type": "string"},
                 "set": {"type": "string"},
-                "variants": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
-                "select": {"type": ["string", "null"]}
+                "selection": {},
             },
-            "required": ["path", "prim_path", "set", "variants"],
-            "additionalProperties": True
+            "additionalProperties": True,
         },
-        "Create/update a variant set and author per-variant refs/xforms in ONE call. Do NOT set 'variantSets' attribute directly; do NOT list/set variants in loops. Flat JSON only.",
-    ),
-    "delete_variant_in_file": (
-        t3.tool_delete_variant_in_file,
-        {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-                "prim_path": {"type": "string"},
-                "set": {"type": "string"},
-                "name": {"type": "string"}
-            },
-            "required": ["path", "prim_path", "set", "name"],
-            "additionalProperties": True
-        },
-        "Delete a variant by name in a variant set and save. Flat JSON only.",
+        "Stateless: set variant selection and save.",
     ),
     # Materials
     "list_materials_in_file": (
         t3.tool_list_materials_in_file,
-        {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": True},
+        {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "additionalProperties": True,
+        },
         "Stateless: list UsdShade.Material prims.",
     ),
     "bind_material_in_file": (
         t3.tool_bind_material_in_file,
-        {"type": "object", "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}, "material_path": {"type": "string"}}, "additionalProperties": True},
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "prim_path": {"type": "string"},
+                "material_path": {"type": "string"},
+            },
+            "additionalProperties": True,
+        },
         "Stateless: bind a material and save.",
     ),
     "unbind_material_in_file": (
         t3.tool_unbind_material_in_file,
-        {"type": "object", "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}}, "additionalProperties": True},
+        {
+            "type": "object",
+            "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}},
+            "additionalProperties": True,
+        },
         "Stateless: unbind all materials and save.",
     ),
     "get_material_binding_in_file": (
         t3.tool_get_material_binding_in_file,
-        {"type": "object", "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}}, "additionalProperties": True},
+        {
+            "type": "object",
+            "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}},
+            "additionalProperties": True,
+        },
         "Stateless: get currently bound material (path or null) and binding rel info.",
     ),
     # Cameras
     "list_cameras_in_file": (
         t3.tool_list_cameras_in_file,
-        {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": True},
+        {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "additionalProperties": True,
+        },
         "Stateless: list cameras.",
     ),
     "get_camera_in_file": (
         t3.tool_get_camera_in_file,
-        {"type": "object", "properties": {"path": {"type": "string"}, "camera_path": {"type": "string"}}, "additionalProperties": True},
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "camera_path": {"type": "string"},
+            },
+            "additionalProperties": True,
+        },
         "Stateless: get camera parameters.",
     ),
     "set_camera_in_file": (
@@ -156,32 +178,60 @@ TOOLS: Dict[str, Any] = {
             "properties": {
                 "path": {"type": "string"},
                 "camera_path": {"type": "string"},
-                "params": {"type": "object", "additionalProperties": True}
+                "params": {"type": "object", "additionalProperties": True},
             },
-            "additionalProperties": True
+            "additionalProperties": True,
         },
         "Stateless: set camera parameters and save.",
     ),
     # Bounds
     "get_bounds_in_file": (
         t3.tool_get_bounds_in_file,
-        {"type": "object", "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}, "time": {"type": ["string", "number"], "default": "default"}}, "additionalProperties": True},
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "prim_path": {"type": "string"},
+                "time": {"type": ["string", "number"], "default": "default"},
+            },
+            "additionalProperties": True,
+        },
         "Stateless: compute world-space AABB.",
     ),
     # Export / Validate
     "export_usd_file": (
         t3.tool_export_usd_file,
-        {"type": "object", "properties": {"path": {"type": "string"}, "output_path": {"type": "string"}, "flatten": {"type": ["boolean", "null"]}, "skipIfExists": {"type": ["boolean", "null"]}}, "additionalProperties": True},
-        "Export to USD/USDA (optionally flattened). If skipIfExists is true and output exists, returns {skipped:true}. For .usdz output use exportUsdzFile.",
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "output_path": {"type": "string"},
+                "flatten": {"type": ["boolean", "null"]},
+                "skipIfExists": {"type": ["boolean", "null"]},
+            },
+            "additionalProperties": True,
+        },
+        "Export to USD file (optionally flattened). If skipIfExists is true and output exists, returns {skipped:true}.",
     ),
     "export_usdz_file": (
         t3.tool_export_usdz_file,
-        {"type": "object", "properties": {"path": {"type": "string"}, "output_path": {"type": "string"}}, "additionalProperties": True},
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "output_path": {"type": "string"},
+            },
+            "additionalProperties": True,
+        },
         "Export to USDZ archive.",
     ),
     "validate_stage_file": (
         t3.tool_validate_stage_file,
-        {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": True},
+        {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "additionalProperties": True,
+        },
         "Validate stage and return issues.",
     ),
     # Composition helpers
@@ -193,9 +243,9 @@ TOOLS: Dict[str, Any] = {
                 "path": {"type": "string"},
                 "prim_path": {"type": "string"},
                 "asset_path": {"type": "string"},
-                "internal_path": {"type": ["string", "null"]}
+                "internal_path": {"type": ["string", "null"]},
             },
-            "additionalProperties": True
+            "additionalProperties": True,
         },
         "Add a reference to a prim and save.",
     ),
@@ -206,22 +256,19 @@ TOOLS: Dict[str, Any] = {
             "properties": {
                 "path": {"type": "string"},
                 "sublayer": {"type": "string"},
-                "insert_index": {"type": ["integer", "string", "null"]}
+                "insert_index": {"type": ["integer", "string", "null"]},
             },
-            "additionalProperties": True
+            "additionalProperties": True,
         },
-        "Append or insert a sublayer into the root layer and save. Flat JSON only.",
+        "Append or insert a sublayer into the root layer and save.",
     ),
     "set_default_prim_in_file": (
         t3.tool_set_default_prim_in_file,
         {
             "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-                "prim_path": {"type": "string"}
-            },
+            "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}},
             "required": ["path", "prim_path"],
-            "additionalProperties": True
+            "additionalProperties": True,
         },
         "Set stage defaultPrim to an existing prim path and save.",
     ),
@@ -238,15 +285,15 @@ TOOLS: Dict[str, Any] = {
                         "properties": {
                             "prim_path": {"type": "string"},
                             "asset_path": {"type": "string"},
-                            "internal_path": {"type": ["string", "null"]}
+                            "internal_path": {"type": ["string", "null"]},
                         },
                         "required": ["prim_path", "asset_path"],
-                        "additionalProperties": True
-                    }
-                }
+                        "additionalProperties": True,
+                    },
+                },
             },
             "required": ["path", "items"],
-            "additionalProperties": True
+            "additionalProperties": True,
         },
         "Batch: add multiple references and save once.",
     ),
@@ -263,31 +310,41 @@ TOOLS: Dict[str, Any] = {
                         "properties": {
                             "asset_path": {"type": "string"},
                             "name": {"type": ["string", "null"]},
-                            "internal_path": {"type": ["string", "null"]}
+                            "internal_path": {"type": ["string", "null"]},
                         },
                         "required": ["asset_path"],
-                        "additionalProperties": True
-                    }
+                        "additionalProperties": True,
+                    },
                 },
                 "container_root": {"type": ["string", "null"]},
                 "flatten": {"type": ["boolean", "null"]},
                 "upAxis": {"type": ["string", "null"]},
                 "setDefaultPrim": {"type": ["boolean", "null"]},
-                "skipIfExists": {"type": ["boolean", "null"]}
+                "skipIfExists": {"type": ["boolean", "null"]},
+                "clearExisting": {"type": ["boolean", "null"]},
             },
             "required": ["output_path", "assets"],
-            "additionalProperties": True
+            "additionalProperties": True,
         },
-        "Compose an assembly by ensuring stage and adding references under a container root; resolves defaultPrim for internal paths and optionally flattens USDZ to USDA.",
+        "Compose an assembly by ensuring stage and adding references under a container root; resolves defaultPrim for internal paths and optionally flattens USDZ to USDA. Set clearExisting=true to clear all root prims before composing, or false (default) to append to existing stage.",
     ),
     "summarize_file": (
         t0.tool_summarize_file,
-        {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": True},
+        {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "additionalProperties": True,
+        },
         "Open a USD file temporarily and return a summary (no state).",
     ),
     "close_stage": (
         t0.tool_close_stage,
-        {"type": "object", "properties": {"stage_id": {"type": "string"}}, "required": ["stage_id"], "additionalProperties": False},
+        {
+            "type": "object",
+            "properties": {"stage_id": {"type": "string"}},
+            "required": ["stage_id"],
+            "additionalProperties": False,
+        },
         "Close a previously opened stage.",
     ),
     "list_open_stages": (
@@ -297,7 +354,11 @@ TOOLS: Dict[str, Any] = {
     ),
     "get_stage_summary": (
         t0.tool_get_stage_summary,
-        {"type": "object", "properties": {"stage_id": {"type": "string"}}, "additionalProperties": True},
+        {
+            "type": "object",
+            "properties": {"stage_id": {"type": "string"}},
+            "additionalProperties": True,
+        },
         "Summarize layers, roots, timecodes, upAxis, metersPerUnit.",
     ),
     "list_prims": (
@@ -323,10 +384,10 @@ TOOLS: Dict[str, Any] = {
                 "path": {"type": "string"},
                 "root": {"type": "string", "default": "/"},
                 "depth": {"type": "integer", "default": 1},
-                "typeFilter": {"type": ["string", "null"]}
+                "typeFilter": {"type": ["string", "null"]},
             },
             "required": ["path"],
-            "additionalProperties": True
+            "additionalProperties": True,
         },
         "Open a USD file and list prim paths (stateless).",
     ),
@@ -334,7 +395,10 @@ TOOLS: Dict[str, Any] = {
         t0.tool_get_prim_info,
         {
             "type": "object",
-            "properties": {"stage_id": {"type": "string"}, "prim_path": {"type": "string"}},
+            "properties": {
+                "stage_id": {"type": "string"},
+                "prim_path": {"type": "string"},
+            },
             "required": ["stage_id", "prim_path"],
             "additionalProperties": False,
         },
@@ -345,7 +409,7 @@ TOOLS: Dict[str, Any] = {
         {
             "type": "object",
             "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}},
-            "additionalProperties": True
+            "additionalProperties": True,
         },
         "Stateless: get prim info from a file path.",
     ),
@@ -372,9 +436,9 @@ TOOLS: Dict[str, Any] = {
                 "path": {"type": "string"},
                 "prim_path": {"type": "string"},
                 "attr": {"type": "string"},
-                "time": {"type": ["string", "number"], "default": "default"}
+                "time": {"type": ["string", "number"], "default": "default"},
             },
-            "additionalProperties": True
+            "additionalProperties": True,
         },
         "Stateless: read an attribute value from a file path.",
     ),
@@ -386,10 +450,12 @@ TOOLS: Dict[str, Any] = {
                 "path": {"type": "string"},
                 "prim_path": {"type": "string"},
                 "attr": {"type": "string"},
-                "value": {"type": ["string", "number", "boolean", "array", "object", "null"]},
-                "time": {"type": ["string", "number"], "default": "default"}
+                "value": {
+                    "type": ["string", "number", "boolean", "array", "object", "null"]
+                },
+                "time": {"type": ["string", "number"], "default": "default"},
             },
-            "additionalProperties": True
+            "additionalProperties": True,
         },
         "Stateless: write an attribute value and save in place.",
     ),
@@ -406,16 +472,25 @@ TOOLS: Dict[str, Any] = {
                         "properties": {
                             "prim_path": {"type": "string"},
                             "attr": {"type": "string"},
-                            "value": {"type": ["string", "number", "boolean", "array", "object", "null"]},
-                            "time": {"type": ["string", "number"]}
+                            "value": {
+                                "type": [
+                                    "string",
+                                    "number",
+                                    "boolean",
+                                    "array",
+                                    "object",
+                                    "null",
+                                ]
+                            },
+                            "time": {"type": ["string", "number"]},
                         },
                         "required": ["prim_path", "attr"],
-                        "additionalProperties": True
-                    }
-                }
+                        "additionalProperties": True,
+                    },
+                },
             },
             "required": ["path", "items"],
-            "additionalProperties": True
+            "additionalProperties": True,
         },
         "Stateless: batch set attribute values and save once.",
     ),
@@ -427,7 +502,9 @@ TOOLS: Dict[str, Any] = {
                 "stage_id": {"type": "string"},
                 "prim_path": {"type": "string"},
                 "attr": {"type": "string"},
-                "value": {"type": ["string", "number", "boolean", "array", "object", "null"]},
+                "value": {
+                    "type": ["string", "number", "boolean", "array", "object", "null"]
+                },
                 "time": {"type": ["string", "number"], "default": "default"},
             },
             "required": ["stage_id", "prim_path", "attr", "value"],
@@ -472,18 +549,18 @@ TOOLS: Dict[str, Any] = {
                 "path": {"type": "string"},
                 "prim_path": {"type": "string"},
                 "type_name": {"type": ["string", "null"]},
-                "specifier": {"type": ["string", "null"]}
+                "specifier": {"type": ["string", "null"]},
             },
-            "additionalProperties": True
+            "additionalProperties": True,
         },
-        "Ensure a prim exists at prim_path (creates if missing) and save. Flat JSON only.",
+        "Stateless: create a prim and save.",
     ),
     "delete_prim_in_file": (
         t2.tool_delete_prim_in_file,
         {
             "type": "object",
             "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}},
-            "additionalProperties": True
+            "additionalProperties": True,
         },
         "Stateless: delete a prim and save.",
     ),
@@ -491,8 +568,12 @@ TOOLS: Dict[str, Any] = {
         t2.tool_get_xform_in_file,
         {
             "type": "object",
-            "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}, "time": {"type": ["string", "number"], "default": "default"}},
-            "additionalProperties": True
+            "properties": {
+                "path": {"type": "string"},
+                "prim_path": {"type": "string"},
+                "time": {"type": ["string", "number"], "default": "default"},
+            },
+            "additionalProperties": True,
         },
         "Stateless: get local/world matrices and xformOps.",
     ),
@@ -507,10 +588,10 @@ TOOLS: Dict[str, Any] = {
                 "ops": {"type": ["array", "null"]},
                 "matrix": {
                     "type": ["array", "null"],
-                    "items": {"type": "array", "items": {"type": "number"}}
-                }
+                    "items": {"type": "array", "items": {"type": "number"}},
+                },
             },
-            "additionalProperties": True
+            "additionalProperties": True,
         },
         "Stateless: set xform via ops or 4x4 matrix and save.",
     ),
@@ -561,8 +642,6 @@ _short_aliases = {
     "set_xform_in_file": ["setXformFile"],
     "list_variants_in_file": ["listVariantsFile"],
     "set_variant_in_file": ["setVariantFile"],
-    "author_variants_in_file": ["authorVariantsInFile"],
-    "delete_variant_in_file": ["deleteVariantInFile"],
     "list_materials_in_file": ["listMaterialsFile"],
     "bind_material_in_file": ["bindMaterialFile"],
     "unbind_material_in_file": ["unbindMaterialFile"],
@@ -614,7 +693,19 @@ async def _list_tools() -> List[Tool]:
 async def _call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
     entry = TOOLS.get(name)
     if not entry:
-        return [TextContent.model_validate({"type": "text", "text": json.dumps({"ok": False, "error": {"code": "unknown_tool", "message": name}})})]
+        return [
+            TextContent.model_validate(
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {
+                            "ok": False,
+                            "error": {"code": "unknown_tool", "message": name},
+                        }
+                    ),
+                }
+            )
+        ]
     handler = entry[0]
     try:
         arguments = _normalize_args(name, arguments)
@@ -622,14 +713,46 @@ async def _call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             arguments = {}
         resp = handler(arguments)
     except Exception as exc:
-        return [TextContent.model_validate({"type": "text", "text": json.dumps({"ok": False, "error": {"code": "call_failed", "message": str(exc)}})})]
+        return [
+            TextContent.model_validate(
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {
+                            "ok": False,
+                            "error": {"code": "call_failed", "message": str(exc)},
+                        }
+                    ),
+                }
+            )
+        ]
     if not isinstance(resp, dict) or "ok" not in resp:
-        return [TextContent.model_validate({"type": "text", "text": json.dumps({"ok": False, "error": {"code": "bad_response", "message": "invalid"}})})]
+        return [
+            TextContent.model_validate(
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {
+                            "ok": False,
+                            "error": {"code": "bad_response", "message": "invalid"},
+                        }
+                    ),
+                }
+            )
+        ]
     if not resp["ok"]:
-        payload = json.dumps(resp["error"]) if not isinstance(resp["error"], str) else resp["error"]
+        payload = (
+            json.dumps(resp["error"])
+            if not isinstance(resp["error"], str)
+            else resp["error"]
+        )
         return [TextContent.model_validate({"type": "text", "text": payload})]
     # Explicitly construct a dict and validate into TextContent to satisfy strict clients
-    return [TextContent.model_validate({"type": "text", "text": json.dumps(resp.get("result", {}))})]
+    return [
+        TextContent.model_validate(
+            {"type": "text", "text": json.dumps(resp.get("result", {}))}
+        )
+    ]
 
 
 async def _main_async() -> int:
@@ -639,16 +762,8 @@ async def _main_async() -> int:
             server_version=__version__,
             website_url="https://github.com/your-org/usd-mcp",
             icons=[],
-            instructions=(
-                "Inputs must be FLAT JSON objects (no nested 'values' wrapper). "
-                "Prefer single-call helpers (composeReferencedAssembly, authorVariantsInFile, setAttrsFile). "
-                "Do NOT author 'variantSets' by setAttr; use authorVariantsInFile. "
-                "When packaging to .usdz, first build the .usda, then exportUsdzFile. "
-                "Tool-call budgets are limited; avoid probing/listing unless required."
-            ),
-            capabilities={
-                "tools": {}
-            }
+            instructions="Use the listed tools to open, inspect, and modify USD stages. Inputs and outputs are JSON.",
+            capabilities={"tools": {}},
         )
         await server.run(read, write, initialization_options=init_opts)
     return 0
@@ -660,5 +775,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-

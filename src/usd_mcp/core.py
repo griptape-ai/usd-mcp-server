@@ -56,6 +56,7 @@ def compose_referenced_assembly(
     upAxis: Optional[str] = "Z",
     setDefaultPrim: bool = True,
     skipIfExists: bool = True,
+    clearExisting: bool = False,
 ) -> Dict[str, Any]:
     return _unwrap(
         tool_compose_referenced_assembly(
@@ -67,6 +68,7 @@ def compose_referenced_assembly(
                 "upAxis": upAxis,
                 "setDefaultPrim": setDefaultPrim,
                 "skipIfExists": skipIfExists,
+                "clearExisting": clearExisting,
             }
         )
     )
