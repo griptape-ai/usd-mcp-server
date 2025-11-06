@@ -38,10 +38,16 @@ Agent Rules
 
 Composition (preferred)
 - One‑shot compose with optional USDZ→USDA flatten, container root, and defaultPrim:
-  - "Execute one action and print only the tool’s JSON result. No prose. Call composeReferencedAssembly with: {\"output_path\":\"<assembly.usda>\",\"assets\":[{\"asset_path\":\"<a.usdz>\",\"name\":\"a\",\"internal_path\":\"/root/model\"},{\"asset_path\":\"<b.usdz>\",\"name\":\"b\",\"internal_path\":\"/root/model\"}],\"container_root\":\"/Assets\",\"flatten\":true,\"upAxis\":\"Z\",\"setDefaultPrim\":true,\"skipIfExists\":true}."
+  - "Execute one action and print only the tool's JSON result. No prose. Call composeReferencedAssembly with: {\"output_path\":\"<assembly.usda>\",\"assets\":[{\"asset_path\":\"<a.usdz>\",\"name\":\"a\",\"internal_path\":\"/root/model\"},{\"asset_path\":\"<b.usdz>\",\"name\":\"b\",\"internal_path\":\"/root/model\"}],\"container_root\":\"/Assets\",\"flatten\":true,\"upAxis\":\"Z\",\"setDefaultPrim\":true,\"skipIfExists\":true}."
 - Notes:
-  - internal_path can be omitted; the server resolves it from the asset’s defaultPrim. Supplying "/root/model" explicitly makes viewers resolve predictably.
+  - internal_path can be omitted; the server resolves it from the asset's defaultPrim. Supplying "/root/model" explicitly makes viewers resolve predictably.
   - composeReferencedAssembly is idempotent: it opens or creates stages, ensures container root, and sets defaultPrim when requested.
+  - **container_root**: If omitted or set to `/Assets`, automatically derives from output_path filename (e.g., `/path/to/blue_shoe_asset.usda` → `/blue_shoe_asset`). If explicitly provided, uses that value.
+  - **flatten**: Set `flatten: false` to keep USDZ files as references (don't convert to USDA). Default is `true`.
+  - **clearExisting**: Set `clearExisting: true` to clear all root prims before composing. Default is `false`.
+  - **Relative paths**: Use relative paths like `"./model/asset.usdz"` for asset_path - they resolve relative to the output file's directory.
+- Example for single asset assembly:
+  - "Create an assembly by referencing ./model/blue_shoe.usdz as blue_shoe_asset. Use composeReferencedAssembly with: {\"output_path\":\"/path/to/blue_shoe_asset.usda\",\"assets\":[{\"asset_path\":\"./model/blue_shoe.usdz\",\"name\":\"blue_shoe_asset\"}],\"flatten\":false,\"clearExisting\":true}. Note: container_root is automatically derived from output_path filename (/blue_shoe_asset), so it can be omitted."
 
 Composition (fallback batch)
 - If composeReferencedAssembly is unavailable:

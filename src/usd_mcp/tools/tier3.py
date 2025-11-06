@@ -638,7 +638,7 @@ def tool_compose_referenced_assembly(params: Dict[str, Any]) -> Dict[str, Any]:
     Usd, UsdGeom, _, _ = _import_pxr()
     output_path: str = _normalize_file_path(params.get("output_path"))
     assets: List[Dict[str, Any]] = params.get("assets") or []
-    container_root: str = params.get("container_root", "/Assets") or "/Assets"
+    container_root_param = params.get("container_root")
     flatten: bool = bool(params.get("flatten", True))
     up_axis: Optional[str] = params.get("upAxis")
     set_default: bool = bool(params.get("setDefaultPrim", True))
@@ -648,6 +648,18 @@ def tool_compose_referenced_assembly(params: Dict[str, Any]) -> Dict[str, Any]:
         return error_response("invalid_params", "'output_path' is required")
     if not isinstance(assets, list) or not assets:
         return error_response("invalid_params", "'assets' must be a non-empty array")
+
+    # Auto-derive container_root from output_path if not explicitly provided
+    if not container_root_param or container_root_param == "/Assets":
+        # Extract filename without extension from output_path
+        output_basename = os.path.basename(output_path)
+        output_name, _ = os.path.splitext(output_basename)
+        if output_name:
+            container_root = "/" + output_name
+        else:
+            container_root = "/Assets"
+    else:
+        container_root = container_root_param
 
     # Open-or-create stage
     stage = None
