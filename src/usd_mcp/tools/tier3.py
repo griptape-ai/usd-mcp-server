@@ -504,6 +504,175 @@ def tool_set_default_prim_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
     return _ok({"defaultPrim": prim_path})
 
 
+def tool_author_variants_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Create/update a variant set on a prim and author per-variant opinions.
+
+    Inputs:
+      - path: USD file to edit
+      - prim_path: prim where the variant set lives (usually an Xform container)
+      - set: variant set name (e.g., "model")
+      - variants: array of variant specs, each may contain:
+          { name: str,
+            asset_path?: str, internal_path?: str, clear_refs?: bool,
+            xform?: { matrix?: [[...]], ops?: [{op,value}] }
+          }
+      - select: optional variant name to select after authoring
+    """
+    Usd, UsdGeom, _, _ = _import_pxr()
+    from pxr import Gf  # type: ignore
+    path: str = _normalize_file_path(params.get("path"))
+    prim_path: str = params.get("prim_path") or ""
+    set_name: str = params.get("set") or ""
+    variants: List[Dict[str, Any]] = params.get("variants") or []
+    select: Optional[str] = params.get("select")
+    if not path or not prim_path or not set_name or not isinstance(variants, list) or not variants:
+        return error_response("invalid_params", "'path','prim_path','set','variants' required")
+
+    stage = Usd.Stage.Open(path)
+    if stage is None:
+        return error_response("open_failed", f"Failed to open stage: {path}")
+    prim = stage.GetPrimAtPath(prim_path)
+    if not prim:
+        return error_response("not_found", f"Prim not found: {prim_path}")
+
+    vset = prim.GetVariantSets().AddVariantSet(set_name)
+
+    results: List[Dict[str, Any]] = []
+    for v in variants:
+        vname = (v.get("name") or "").strip()
+        if not vname:
+            results.append({"name": vname, "ok": False, "error": "missing name"})
+            continue
+        # Ensure variant exists
+        try:
+            vset.AddVariant(vname)
+        except Exception:
+            pass
+
+        # Enter variant edit context and author opinions
+        try:
+            with vset.GetVariantEditContext():
+                # Handle references
+                asset = _normalize_file_path(v.get("asset_path"))
+                internal = (v.get("internal_path") or "").strip()
+                clear_refs = bool(v.get("clear_refs", False))
+                if clear_refs:
+                    try:
+                        # Clear existing references list opinions in this context
+                        prim.GetReferences().ClearReferences()
+                    except Exception:
+                        pass
+                if asset:
+                    if internal == "/":
+                        internal = ""
+                    if not internal:
+                        try:
+                            rstage = Usd.Stage.Open(asset)
+                            if rstage:
+                                dp = rstage.GetDefaultPrim()
+                                if dp and dp.IsValid():
+                                    internal = dp.GetPath().pathString
+                        except Exception:
+                            internal = ""
+                    if internal:
+                        prim.GetReferences().AddReference(asset, internal)
+                    else:
+                        prim.GetReferences().AddReference(asset)
+
+                # Handle xform opinions in the variant
+                xform_spec = v.get("xform") or {}
+                if isinstance(xform_spec, dict) and xform_spec:
+                    xformable = UsdGeom.Xformable(prim)
+                    mat = xform_spec.get("matrix")
+                    ops = xform_spec.get("ops")
+                    if mat is not None:
+                        # Add or reuse TypeTransform
+                        xf_op = None
+                        for op in xformable.GetOrderedXformOps():
+                            if op.GetOpType() == UsdGeom.XformOp.TypeTransform:
+                                xf_op = op
+                                break
+                        if xf_op is None:
+                            xf_op = xformable.AddXformOp(UsdGeom.XformOp.TypeTransform)
+                        try:
+                            m = Gf.Matrix4d(mat)
+                        except Exception:
+                            m = Gf.Matrix4d(1.0)
+                            for r in range(min(4, len(mat))):
+                                for c in range(min(4, len(mat[r]))):
+                                    m[r][c] = float(mat[r][c])
+                        xf_op.Set(m)
+                    elif ops:
+                        xapi = UsdGeom.XformCommonAPI(prim)
+                        t = None; s = None; r = None
+                        for e in ops:
+                            op_raw = e.get("op") or e.get("opType") or ""
+                            op = str(op_raw).lower().strip()
+                            if op.startswith("xformop:"):
+                                op = op.split(":", 1)[1]
+                            val = e.get("value")
+                            if op in ("translate", "t") and isinstance(val, (list, tuple)):
+                                t = [float(val[0]), float(val[1]), float(val[2])]
+                            elif op in ("scale", "s") and isinstance(val, (list, tuple)):
+                                s = [float(val[0]), float(val[1]), float(val[2])]
+                            elif op in ("rotatexyz", "r") and isinstance(val, (list, tuple)):
+                                r = [float(val[0]), float(val[1]), float(val[2])]
+                        if t is not None:
+                            xapi.SetTranslate(Gf.Vec3d(*t))
+                        if r is not None:
+                            try:
+                                xapi.SetRotate(Gf.Vec3f(*r), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+                            except Exception:
+                                xapi.SetRotate(Gf.Vec3f(*r))
+                        if s is not None:
+                            xapi.SetScale(Gf.Vec3f(*s))
+            results.append({"name": vname, "ok": True})
+        except Exception as exc:
+            results.append({"name": vname, "ok": False, "error": str(exc)})
+
+    # Optionally set selection
+    if select:
+        try:
+            vset.SetVariantSelection(select)
+        except Exception as exc:
+            return error_response("select_failed", str(exc))
+
+    root = stage.GetRootLayer()
+    if not root.Save():
+        return error_response("save_failed", "Failed to save after author_variants")
+    return _ok({"set": set_name, "variants": [r for r in results]})
+
+
+def tool_delete_variant_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Delete a variant by name in a variant set.
+
+    Inputs: path, prim_path, set, name
+    """
+    Usd, _, _, _ = _import_pxr()
+    path: str = _normalize_file_path(params.get("path"))
+    prim_path: str = params.get("prim_path") or ""
+    set_name: str = params.get("set") or ""
+    name: str = params.get("name") or ""
+    if not path or not prim_path or not set_name or not name:
+        return error_response("invalid_params", "'path','prim_path','set','name' required")
+    stage = Usd.Stage.Open(path)
+    if stage is None:
+        return error_response("open_failed", f"Failed to open stage: {path}")
+    prim = stage.GetPrimAtPath(prim_path)
+    if not prim:
+        return error_response("not_found", f"Prim not found: {prim_path}")
+    vset = prim.GetVariantSets().GetVariantSet(set_name)
+    try:
+        ok = vset.RemoveVariant(name)
+        if not ok:
+            return error_response("delete_failed", f"Failed to remove variant: {name}")
+    except Exception as exc:
+        return error_response("delete_failed", str(exc))
+    root = stage.GetRootLayer()
+    if not root.Save():
+        return error_response("save_failed", "Failed to save after delete variant")
+    return _ok({"removed": name})
+
 # Batch: add many references in one call
 def tool_add_references_batch_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
     """Add multiple references to a USD file in one save.

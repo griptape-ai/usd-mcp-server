@@ -489,20 +489,71 @@ def tool_batch_set_attribute_values_in_file(params: Dict[str, Any]) -> Dict[str,
 
     for item in items:
         try:
-            prim_path = (item.get("prim_path") or "").strip()
+            prim_path_raw = (item.get("prim_path") or "").strip()
             attr_name = (item.get("attr") or "").strip()
             # Alias common names
             if attr_name == "displayColor":
                 attr_name = "primvars:displayColor"
             value = item.get("value")
             when = item.get("time", "default")
-            if not prim_path or not attr_name:
-                results.append({"prim_path": prim_path, "attr": attr_name, "ok": False, "error": "missing prim_path or attr"})
+            if not prim_path_raw or not attr_name:
+                results.append({"prim_path": prim_path_raw, "attr": attr_name, "ok": False, "error": "missing prim_path or attr"})
                 continue
+
+            # Support variant edit context via suffix: "/PrimPath.set:variant"
+            prim_path = prim_path_raw
+            variant_ctx = None  # (set, variant)
+            try:
+                if ":" in prim_path and "." in prim_path:
+                    dot_idx = prim_path.rfind(".")
+                    colon_idx = prim_path.rfind(":")
+                    if dot_idx != -1 and colon_idx != -1 and dot_idx < colon_idx and colon_idx - dot_idx > 1:
+                        base = prim_path[:dot_idx]
+                        rest = prim_path[dot_idx + 1 :]
+                        set_name, var_name = rest.split(":", 1)
+                        prim_path = base
+                        variant_ctx = (set_name, var_name)
+            except Exception:
+                variant_ctx = None
+
             prim = stage.GetPrimAtPath(prim_path)
             if not prim:
-                results.append({"prim_path": prim_path, "attr": attr_name, "ok": False, "error": "prim not found"})
+                results.append({"prim_path": prim_path_raw, "attr": attr_name, "ok": False, "error": "prim not found"})
                 continue
+
+            # Disallow direct variantSets authoring – guide to dedicated tool
+            if attr_name == "variantSets" or attr_name.endswith(":variantSelection"):
+                results.append({"prim_path": prim_path_raw, "attr": attr_name, "ok": False, "error": "use authorVariantsInFile/setVariantFile"})
+                continue
+
+            # Enter variant edit context if specified
+            variant_cm = None
+            if variant_ctx is not None:
+                try:
+                    vset = prim.GetVariantSets().AddVariantSet(variant_ctx[0])
+                    vset.AddVariant(variant_ctx[1])
+                    variant_cm = vset.GetVariantEditContext()
+                except Exception as exc:
+                    results.append({"prim_path": prim_path_raw, "attr": attr_name, "ok": False, "error": f"variant ctx failed: {exc}"})
+                    continue
+
+            # Helper to close context
+            def _finish_ok():
+                if variant_cm is not None:
+                    try:
+                        variant_cm.__exit__(None, None, None)
+                    except Exception:
+                        pass
+                results.append({"prim_path": prim_path_raw, "attr": attr_name, "ok": True})
+
+            def _finish_err(msg: str):
+                if variant_cm is not None:
+                    try:
+                        variant_cm.__exit__(None, None, None)
+                    except Exception:
+                        pass
+                results.append({"prim_path": prim_path_raw, "attr": attr_name, "ok": False, "error": msg})
+                
             # Handle transform shorthands via CommonAPI
             if attr_name in ("xformOp:translate", "xformOp:scale") or (attr_name == "size" and isinstance(value, (list, tuple)) and len(value) == 3):
                 xapi = UsdGeom.XformCommonAPI(prim)
@@ -532,12 +583,67 @@ def tool_batch_set_attribute_values_in_file(params: Dict[str, Any]) -> Dict[str,
                     results.append({"prim_path": prim_path, "attr": attr_name, "ok": False, "error": str(exc)})
                     continue
 
+            # Matrix transform support
+            if attr_name == "xformOp:transform" and isinstance(value, (list, tuple)):
+                try:
+                    from pxr import Gf  # type: ignore
+                    xformable = UsdGeom.Xformable(prim)
+                    op = None
+                    for o in xformable.GetOrderedXformOps():
+                        if o.GetOpType() == UsdGeom.XformOp.TypeTransform:
+                            op = o
+                            break
+                    if op is None:
+                        op = xformable.AddXformOp(UsdGeom.XformOp.TypeTransform)
+                    m = Gf.Matrix4d(1.0)
+                    for r in range(min(4, len(value))):
+                        for c in range(min(4, len(value[r]))):
+                            m[r][c] = float(value[r][c])
+                    if when == "default":
+                        op.Set(m)
+                    else:
+                        op.Set(m, float(when))
+                    _finish_ok()
+                except Exception as exc:
+                    _finish_err(str(exc))
+                continue
+
+            # References support (array of {asset_path, internal_path?})
+            if attr_name == "references" and isinstance(value, list):
+                try:
+                    refs = prim.GetReferences()
+                    refs.ClearReferences()
+                    for r in value:
+                        asset = _normalize_file_path(r.get("asset_path"))
+                        internal = (r.get("internal_path") or "").strip() if isinstance(r, dict) else ""
+                        if internal == "/":
+                            internal = ""
+                        if not asset:
+                            continue
+                        if not internal:
+                            try:
+                                rs = Usd.Stage.Open(asset)
+                                if rs:
+                                    dp = rs.GetDefaultPrim()
+                                    if dp and dp.IsValid():
+                                        internal = dp.GetPath().pathString
+                            except Exception:
+                                internal = ""
+                        if internal:
+                            refs.AddReference(asset, internal)
+                        else:
+                            refs.AddReference(asset)
+                    _finish_ok()
+                except Exception as exc:
+                    _finish_err(str(exc))
+                continue
+
             value = _coerce(attr_name, value)
             ok = prim.GetAttribute(attr_name).Set(value) if when == "default" else prim.GetAttribute(attr_name).Set(value, float(when))
             if not ok:
-                results.append({"prim_path": prim_path, "attr": attr_name, "ok": False, "error": "set failed"})
+                _finish_err("set failed")
             else:
-                results.append({"prim_path": prim_path, "attr": attr_name, "ok": True})
+                _finish_ok()
         except Exception as exc:
             results.append({"prim_path": item.get("prim_path"), "attr": item.get("attr"), "ok": False, "error": str(exc)})
 

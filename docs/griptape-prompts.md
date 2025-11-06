@@ -161,6 +161,73 @@ Tier 3 (variants, materials, cameras, bounds)
   - Note: On some USD builds, BBoxCache may return centered world bounds under hierarchy. The server applies fallbacks; if bounds still appear centered, treat them as local-space extents and use getXformFile.worldMatrix for truth.
 - "Export <path> flattened to /tmp/flat.usda and export to USDZ /tmp/pack.usdz."
 
+Variants (authoring and selection)
+- Use authorVariantsInFile for creation/update in one call (flat JSON only). Do NOT write variantSets directly and do NOT loop setVariantFile to create variants.
+- After authoring, select with setVariantFile. You can have multiple variant sets on the same prim (e.g., asset, size, look, lod).
+- Prefer referencing USDZs without flattening to keep packaged textures intact.
+
+Quick NL prompt (asset swap)
+- “Create/overwrite <mop_variants.usda> (Z-up). Ensure Xform /World/Mop. Author variants on /World/Mop in ONE call: set ‘asset’ with
+  - asset.mop: reference </abs/path/mop.usdz> using asset defaultPrim (no flatten)
+  - asset.broom: reference </abs/path/broom.usdz> using asset defaultPrim (no flatten)
+  Select asset=mop. Save and export to </abs/path/mop_combined.usdz>. Flat JSON only; don’t write ‘variantSets’.”
+
+Quick NL prompt (two sets: asset + size)
+- “Create/overwrite <stage.usda> (Z-up). Ensure Xform /World/Item. Author variants in two calls:
+  1) authorVariantsInFile set=‘asset’: mop → </…/mop.usdz>, broom → </…/broom.usdz>
+  2) authorVariantsInFile set=‘size’: full → identity, small → xformOp:transform = diag([0.3,0.3,0.3,1])
+  Select asset=mop and size=small. Export to </…/combined.usdz>. Flat JSON only.”
+
+authorVariantsInFile (explicit JSON example)
+```json
+{
+  "path": "/abs/mop_variants.usda",
+  "prim_path": "/World/Mop",
+  "set": "model",
+  "variants": [
+    { "name": "mop", "asset_path": "/abs/mop.usdz" },
+    { "name": "mop_small", "asset_path": "/abs/mop_small.usdz",
+      "xform": { "matrix": [[0.3,0,0,0],[0,0.3,0,0],[0,0,0.3,0],[0,0,0,1]] } }
+  ],
+  "select": "mop"
+}
+```
+
+Selecting a variant (stateless)
+```json
+{ "path": "/abs/mop_variants.usda", "prim_path": "/World/Mop", "set": "model", "selection": "mop" }
+```
+
+Verifying variants
+```json
+{ "path": "/abs/mop_variants.usda", "prim_path": "/World/Mop" }
+```
+
+Batch fallback (only if authorVariantsInFile unavailable)
+- Supported variant-context suffix: use dot+colon on prim_path to enter a variant edit context: 
+  - "/World/Mop.model:mop" and "/World/Mop.model:mop_small"
+- Example items array:
+```json
+{
+  "path": "/abs/mop_variants.usda",
+  "items": [
+    { "prim_path": "/World/Mop.model:mop", "attr": "references",
+      "value": [{ "asset_path": "/abs/mop.usdz" }] },
+    { "prim_path": "/World/Mop.model:mop_small", "attr": "references",
+      "value": [{ "asset_path": "/abs/mop_small.usdz" }] },
+    { "prim_path": "/World/Mop.model:mop_small", "attr": "xformOp:transform",
+      "value": [[0.3,0,0,0],[0,0.3,0,0],[0,0,0.3,0],[0,0,0,1]] }
+  ]
+}
+```
+- Notes:
+  - Direct writes to ‘variantSets’ or ‘*:variantSelection’ are rejected; use authorVariantsInFile or setVariantFile.
+  - Do not use braces in prim paths; use dot+colon (set:variant) context only.
+
+Naming guidance
+- Choose set names by intent: ‘asset’ (swap models), ‘size’ (scale), ‘look’ (materials), ‘lod’ (levels of detail), ‘state’ (poses/config).
+- Keep tokens lowercase, consistent across assets; e.g., asset=mop|broom, size=full|small.
+
 Path robustness
 - "Summarize  <path with extra spaces>  ."
 - "Summarize Users/…/simple.usda." (no leading slash)

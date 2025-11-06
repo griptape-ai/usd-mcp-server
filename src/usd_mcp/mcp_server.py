@@ -79,12 +79,43 @@ TOOLS: Dict[str, Any] = {
     "list_variants_in_file": (
         t3.tool_list_variants_in_file,
         {"type": "object", "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}}, "additionalProperties": True},
-        "Stateless: list variant sets and selections.",
+        "Stateless: list variant sets and selections. Flat JSON only (no 'values' wrapper).",
     ),
     "set_variant_in_file": (
         t3.tool_set_variant_in_file,
         {"type": "object", "properties": {"path": {"type": "string"}, "prim_path": {"type": "string"}, "set": {"type": "string"}, "selection": {}}, "additionalProperties": True},
-        "Stateless: set variant selection and save.",
+        "Stateless: set variant selection (does not create variants). Use authorVariantsInFile to create/update variants. Flat JSON only.",
+    ),
+    "author_variants_in_file": (
+        t3.tool_author_variants_in_file,
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "prim_path": {"type": "string"},
+                "set": {"type": "string"},
+                "variants": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
+                "select": {"type": ["string", "null"]}
+            },
+            "required": ["path", "prim_path", "set", "variants"],
+            "additionalProperties": True
+        },
+        "Create/update a variant set and author per-variant refs/xforms in ONE call. Do NOT set 'variantSets' attribute directly; do NOT list/set variants in loops. Flat JSON only.",
+    ),
+    "delete_variant_in_file": (
+        t3.tool_delete_variant_in_file,
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "prim_path": {"type": "string"},
+                "set": {"type": "string"},
+                "name": {"type": "string"}
+            },
+            "required": ["path", "prim_path", "set", "name"],
+            "additionalProperties": True
+        },
+        "Delete a variant by name in a variant set and save. Flat JSON only.",
     ),
     # Materials
     "list_materials_in_file": (
@@ -141,7 +172,7 @@ TOOLS: Dict[str, Any] = {
     "export_usd_file": (
         t3.tool_export_usd_file,
         {"type": "object", "properties": {"path": {"type": "string"}, "output_path": {"type": "string"}, "flatten": {"type": ["boolean", "null"]}, "skipIfExists": {"type": ["boolean", "null"]}}, "additionalProperties": True},
-        "Export to USD file (optionally flattened). If skipIfExists is true and output exists, returns {skipped:true}.",
+        "Export to USD/USDA (optionally flattened). If skipIfExists is true and output exists, returns {skipped:true}. For .usdz output use exportUsdzFile.",
     ),
     "export_usdz_file": (
         t3.tool_export_usdz_file,
@@ -179,7 +210,7 @@ TOOLS: Dict[str, Any] = {
             },
             "additionalProperties": True
         },
-        "Append or insert a sublayer into the root layer and save.",
+        "Append or insert a sublayer into the root layer and save. Flat JSON only.",
     ),
     "set_default_prim_in_file": (
         t3.tool_set_default_prim_in_file,
@@ -445,7 +476,7 @@ TOOLS: Dict[str, Any] = {
             },
             "additionalProperties": True
         },
-        "Stateless: create a prim and save.",
+        "Ensure a prim exists at prim_path (creates if missing) and save. Flat JSON only.",
     ),
     "delete_prim_in_file": (
         t2.tool_delete_prim_in_file,
@@ -530,6 +561,8 @@ _short_aliases = {
     "set_xform_in_file": ["setXformFile"],
     "list_variants_in_file": ["listVariantsFile"],
     "set_variant_in_file": ["setVariantFile"],
+    "author_variants_in_file": ["authorVariantsInFile"],
+    "delete_variant_in_file": ["deleteVariantInFile"],
     "list_materials_in_file": ["listMaterialsFile"],
     "bind_material_in_file": ["bindMaterialFile"],
     "unbind_material_in_file": ["unbindMaterialFile"],
@@ -606,7 +639,13 @@ async def _main_async() -> int:
             server_version=__version__,
             website_url="https://github.com/your-org/usd-mcp",
             icons=[],
-            instructions="Use the listed tools to open, inspect, and modify USD stages. Inputs and outputs are JSON.",
+            instructions=(
+                "Inputs must be FLAT JSON objects (no nested 'values' wrapper). "
+                "Prefer single-call helpers (composeReferencedAssembly, authorVariantsInFile, setAttrsFile). "
+                "Do NOT author 'variantSets' by setAttr; use authorVariantsInFile. "
+                "When packaging to .usdz, first build the .usda, then exportUsdzFile. "
+                "Tool-call budgets are limited; avoid probing/listing unless required."
+            ),
             capabilities={
                 "tools": {}
             }
