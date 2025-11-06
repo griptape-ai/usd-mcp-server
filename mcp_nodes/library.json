@@ -1,0 +1,69 @@
+{
+  "name": "USD MCP Nodes",
+  "library_schema_version": "0.1.0",
+  "metadata": {
+    "author": "usd-mcp",
+    "description": "Deterministic nodes that call usd_mcp.core directly (no MCP server required).",
+    "library_version": "0.1.0",
+    "engine_version": "0.50.0",
+    "tags": ["USD", "MCP", "3D", "Deterministic"],
+    "dependencies": {
+      "pip_dependencies": [
+        "/Users/kyleroche/Documents/Development/usd-mcp",
+        "usd-core==25.11",
+        "json-repair>=0.46.1",
+        "requests>=2.31.0"
+      ]
+    }
+  },
+  "settings": [],
+  "categories": [
+    {
+      "usd": {
+        "color": "border-indigo-500",
+        "title": "USD",
+        "description": "Deterministic USD nodes backed by usd_mcp.core",
+        "icon": "Cube"
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "class_name": "ComposeReferencedAssemblyNode",
+      "file_path": "compose_referenced_assembly.py",
+      "metadata": {
+        "category": "usd",
+        "description": "Compose an assembly stage by referencing assets; optional USDZ→USDA flatten.",
+        "display_name": "Compose Referenced Assembly"
+      }
+    },
+    {
+      "class_name": "ExportUsdNode",
+      "file_path": "export_usd.py",
+      "metadata": {
+        "category": "usd",
+        "description": "Export/flatten USD or USDZ to a USD/USDA file (skip if exists).",
+        "display_name": "Export USD"
+      }
+    },
+    {
+      "class_name": "BatchSetAttributesNode",
+      "file_path": "batch_set_attributes.py",
+      "metadata": {
+        "category": "usd",
+        "description": "Batch set attribute values in a single save (displayColor coercions supported).",
+        "display_name": "Batch Set Attributes"
+      }
+    },
+    {
+      "class_name": "USDZViewerLauncher",
+      "file_path": "usdz_viewer_launcher.py",
+      "metadata": {
+        "category": "usd",
+        "description": "Open a self-contained USDZ viewer in the browser (optional same-origin mirroring).",
+        "display_name": "USDZ Viewer Launcher"
+      }
+    }
+  ]
+}
+
