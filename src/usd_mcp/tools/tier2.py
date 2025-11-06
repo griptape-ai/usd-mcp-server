@@ -300,42 +300,7 @@ def tool_set_xform_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
                 # Fall back to xform scale if size authoring fails
                 pass
 
-        # If scaling a parent with children, move transform to an existing geometry child (prefer a child gprim),
-        # otherwise create one once. This avoids scaling siblings and prevents duplicate floor cubes.
-        if scale_val is not None:
-            try:
-                has_children = any(child for child in prim.GetChildren())
-            except Exception:
-                has_children = False
-            if has_children:
-                # Pick an existing child gprim if available (prefer a child named 'Geom'); otherwise create 'Geom' Cube
-                target_child = None
-                for child in prim.GetChildren():
-                    name = child.GetName()
-                    try:
-                        if name.lower() == "geom":
-                            target_child = child
-                            break
-                        gp = UsdGeom.Gprim(child)
-                        if bool(gp):
-                            target_child = child
-                    except Exception:
-                        continue
-                if target_child is None:
-                    try:
-                        target_child_path = f"{prim_path}/Geom"
-                        UsdGeom.Cube.Define(stage, Sdf.Path(target_child_path))
-                        target_child = stage.GetPrimAtPath(target_child_path)
-                    except Exception:
-                        target_child = None
-                if target_child and target_child.IsValid():
-                    xapi_p = UsdGeom.XformCommonAPI(target_child)
-                    xapi_p.SetScale(Gf.Vec3f(*scale_val), time_code)
-                    if translate_val is not None:
-                        xapi_p.SetTranslate(Gf.Vec3d(*translate_val), time_code)
-                        translate_val = None
-                    # Do not scale the parent; children will remain unflattened
-                    scale_val = None
+        # Keep transforms authored on the target prim; do not reroute to children.
 
         # Apply via CommonAPI
         if translate_val is not None:
