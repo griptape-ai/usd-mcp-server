@@ -891,17 +891,51 @@ def tool_compose_referenced_assembly(params: Dict[str, Any]) -> Dict[str, Any]:
             except Exception:
                 internal_path = ""
 
-        # If asset name matches container_root's leaf name, use container_root directly
-        # Otherwise, create a child prim under container_root
+        # For layout files (multiple assets), create wrapper Xform structure to preserve asset transforms
+        # Structure: /container/name (wrapper for layout transforms) -> /container/name/asset_name (reference preserves asset transforms)
+        # For single asset assemblies, keep reference directly on the prim
+        is_layout = len(assets) > 1
+
         container_root_leaf = container_root.rstrip("/").split("/")[-1]
         if name == container_root_leaf:
-            container = container_root
+            wrapper_path = container_root
         else:
-            container = container_root.rstrip("/") + "/" + name
+            wrapper_path = container_root.rstrip("/") + "/" + name
 
-        prim = stage.GetPrimAtPath(container)
-        if not prim:
-            prim = stage.DefinePrim(container, "Xform")
+        if is_layout:
+            # Layout file: create wrapper Xform for layout transforms
+            wrapper_prim = stage.GetPrimAtPath(wrapper_path)
+            if not wrapper_prim:
+                wrapper_prim = stage.DefinePrim(wrapper_path, "Xform")
+
+            # Get asset's defaultPrim name for the reference prim
+            ref_prim_name = None
+            try:
+                rstage = Usd.Stage.Open(ref_path_for_open)
+                if rstage:
+                    dp = rstage.GetDefaultPrim()
+                    if dp and dp.IsValid():
+                        ref_prim_name = dp.GetName()
+            except Exception:
+                pass
+            if not ref_prim_name:
+                # Fallback to asset filename
+                ref_prim_name = _basename_noext(ref_path_for_ref) or "asset"
+
+            # Create child Xform for the reference (preserves asset transforms)
+            ref_prim_path = wrapper_path.rstrip("/") + "/" + ref_prim_name
+            ref_prim = stage.GetPrimAtPath(ref_prim_path)
+            if not ref_prim:
+                ref_prim = stage.DefinePrim(ref_prim_path, "Xform")
+
+            # Put reference on child prim
+            prim = ref_prim
+        else:
+            # Single asset assembly: reference directly on the prim (existing behavior)
+            prim = stage.GetPrimAtPath(wrapper_path)
+            if not prim:
+                prim = stage.DefinePrim(wrapper_path, "Xform")
+
         try:
             if internal_path is None:
                 # Explicitly null - reference root without internal_path
