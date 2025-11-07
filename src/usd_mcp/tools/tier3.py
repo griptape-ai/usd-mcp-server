@@ -674,6 +674,12 @@ def tool_compose_referenced_assembly(params: Dict[str, Any]) -> Dict[str, Any]:
                     stage.RemovePrim(prim.GetPath())
                 except Exception:
                     pass
+        # Update upAxis if explicitly provided
+        if up_axis is not None:
+            if str(up_axis).upper().startswith("Z"):
+                UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+            else:
+                UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.y)
     else:
         stage = Usd.Stage.CreateNew(output_path)
         # default Z when not specified
@@ -713,7 +719,16 @@ def tool_compose_referenced_assembly(params: Dict[str, Any]) -> Dict[str, Any]:
         name = (a.get("name") or _basename_noext(src_path)).strip() or _basename_noext(
             src_path
         )
-        internal_path = (a.get("internal_path") or "").strip()
+        # Check if internal_path was explicitly set to null (reference root)
+        internal_path_raw = a.get("internal_path")
+        if "internal_path" in a and internal_path_raw is None:
+            # Explicitly null - reference root without internal_path
+            internal_path = None
+        elif internal_path_raw:
+            internal_path = str(internal_path_raw).strip()
+        else:
+            # Not provided or empty - will resolve defaultPrim
+            internal_path = ""
 
         # Optionally export USDZ -> USDA sibling
         # Use resolved path for opening, but keep original for reference
@@ -752,7 +767,7 @@ def tool_compose_referenced_assembly(params: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as exc:
             return error_response("export_failed", str(exc))
 
-        # Resolve defaultPrim if internal_path empty
+        # Resolve defaultPrim only if internal_path is empty string (not explicitly None)
         if internal_path == "" or internal_path == "/":
             try:
                 rstage = Usd.Stage.Open(ref_path_for_open)
@@ -777,9 +792,14 @@ def tool_compose_referenced_assembly(params: Dict[str, Any]) -> Dict[str, Any]:
         if not prim:
             prim = stage.DefinePrim(container, "Xform")
         try:
-            if internal_path:
+            if internal_path is None:
+                # Explicitly null - reference root without internal_path
+                prim.GetReferences().AddReference(ref_path_for_ref)
+            elif internal_path:
+                # Has internal_path - use it
                 prim.GetReferences().AddReference(ref_path_for_ref, internal_path)
             else:
+                # Empty after resolution attempt - reference root
                 prim.GetReferences().AddReference(ref_path_for_ref)
             referenced += 1
         except Exception as exc:

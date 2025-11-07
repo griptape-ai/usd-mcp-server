@@ -45,9 +45,17 @@ Composition (preferred)
   - **container_root**: If omitted or set to `/Assets`, automatically derives from output_path filename (e.g., `/path/to/blue_shoe_asset.usda` → `/blue_shoe_asset`). If explicitly provided, uses that value.
   - **flatten**: Set `flatten: false` to keep USDZ files as references (don't convert to USDA). Default is `true`.
   - **clearExisting**: Set `clearExisting: true` to clear all root prims before composing. Default is `false`.
+  - **upAxis**: Set to `"Y"` for Maya compatibility (default is `"Z"`). **IMPORTANT**: Always specify `upAxis: "Y"` for both asset assemblies and layout files that will be used in Maya. The upAxis is updated even when opening existing files if explicitly provided.
   - **Relative paths**: Use relative paths like `"./model/asset.usdz"` for asset_path - they resolve relative to the output file's directory.
+  - **internal_path**: In asset objects, controls which prim in the referenced file to reference:
+    - If omitted or empty string: automatically resolves the referenced file's defaultPrim
+    - If explicitly set to `null`: references the root of the file without an internal_path (e.g., `@./apple/apple_asset.usda@` instead of `@./apple/apple_asset.usda@</apple_asset>`)
+    - If set to a specific path: uses that path (e.g., `"/root/model"`)
+    - When user says "reference the root" or "without internal_path", set `internal_path: null` for each asset
 - Example for single asset assembly:
-  - "Create an assembly by referencing ./model/blue_shoe.usdz as blue_shoe_asset. Use composeReferencedAssembly with: {\"output_path\":\"/path/to/blue_shoe_asset.usda\",\"assets\":[{\"asset_path\":\"./model/blue_shoe.usdz\",\"name\":\"blue_shoe_asset\"}],\"flatten\":false,\"clearExisting\":true}. Note: container_root is automatically derived from output_path filename (/blue_shoe_asset), so it can be omitted."
+  - "Create an assembly by referencing ./model/blue_shoe.usdz as blue_shoe_asset. Use composeReferencedAssembly with: {\"output_path\":\"/path/to/blue_shoe_asset.usda\",\"assets\":[{\"asset_path\":\"./model/blue_shoe.usdz\",\"name\":\"blue_shoe_asset\"}],\"flatten\":false,\"clearExisting\":true,\"upAxis\":\"Y\"}. Note: container_root is automatically derived from output_path filename (/blue_shoe_asset), so it can be omitted. For Maya compatibility, use upAxis: \"Y\"."
+- Example for layout assembly (multiple assets):
+  - "Create a layout assembly by referencing multiple asset files. Use composeReferencedAssembly with: {\"output_path\":\"/path/to/layout.usda\",\"assets\":[{\"asset_path\":\"./apple/apple_asset.usda\",\"name\":\"apple\",\"internal_path\":null},{\"asset_path\":\"./blue_shoe/blue_shoe_asset.usda\",\"name\":\"blue_shoe\",\"internal_path\":null}],\"container_root\":\"/World\",\"flatten\":false,\"clearExisting\":true,\"upAxis\":\"Y\"}. When user says 'reference the root' or 'without internal_path', set internal_path: null for each asset. IMPORTANT: Always set upAxis: \"Y\" for layout files and asset assemblies that will be used in Maya. Note: Transforms in the referenced asset files (like -90 X rotation) are preserved and combined with layout transforms."
 
 Composition (fallback batch)
 - If composeReferencedAssembly is unavailable:
