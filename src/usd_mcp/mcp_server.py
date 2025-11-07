@@ -708,6 +708,17 @@ async def _call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
         ]
     handler = entry[0]
     try:
+        # Unwrap 'values' layer if present (Griptape wraps parameters)
+        if isinstance(arguments, dict) and "values" in arguments:
+            # Check if values is a dict with another 'values' layer (double wrapping)
+            if (
+                isinstance(arguments.get("values"), dict)
+                and "values" in arguments["values"]
+            ):
+                arguments = arguments["values"]["values"]
+            else:
+                arguments = arguments["values"]
+
         arguments = _normalize_args(name, arguments)
         if not isinstance(arguments, dict):
             arguments = {}

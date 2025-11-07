@@ -736,34 +736,145 @@ def tool_compose_referenced_assembly(params: Dict[str, Any]) -> Dict[str, Any]:
         ref_path_for_ref = src_path  # Keep original relative path for reference
 
         try:
-            if flatten and str(src_path).lower().endswith(".usdz"):
+            # Check if we should flatten - check both original and resolved paths
+            is_usdz = str(src_path).lower().endswith(".usdz") or str(
+                resolved_src_path
+            ).lower().endswith(".usdz")
+            if flatten and is_usdz:
                 # For flattened target, resolve relative to original src_path location
                 if not os.path.isabs(src_path):
                     target = os.path.splitext(resolved_src_path)[0] + ".usda"
                 else:
                     target = os.path.splitext(src_path)[0] + ".usda"
+
+                # Check if we need to recreate (always recreate if converting from Z-up to Y-up)
+                should_recreate = False
                 if not (skip_if_exists and os.path.exists(target)):
+                    # File doesn't exist or skip_if_exists is False - need to create
+                    should_recreate = True
+                elif up_axis is not None:
+                    # File exists - check if we're converting from Z-up to Y-up - always recreate in this case
+                    st_check = Usd.Stage.Open(ref_path_for_open)
+                    if st_check is not None:
+                        original_up_axis = UsdGeom.GetStageUpAxis(st_check)
+                        if original_up_axis == UsdGeom.Tokens.z and str(
+                            up_axis
+                        ).upper().startswith("Y"):
+                            should_recreate = True
+
+                # If file exists and we're not recreating, we still need to update paths to point to target
+                if not should_recreate and os.path.exists(target):
+                    # File exists and we're not recreating - just update upAxis if needed
+                    if up_axis is not None:
+                        st = Usd.Stage.Open(target)
+                        if st is not None:
+                            if str(up_axis).upper().startswith("Z"):
+                                UsdGeom.SetStageUpAxis(st, UsdGeom.Tokens.z)
+                            else:
+                                UsdGeom.SetStageUpAxis(st, UsdGeom.Tokens.y)
+                            # Save the updated upAxis
+                            root = st.GetRootLayer()
+                            root.Save()
+                    # Update paths to point to target
+                    if not os.path.isabs(src_path):
+                        try:
+                            ref_path_for_ref = os.path.relpath(target, output_dir)
+                        except ValueError:
+                            ref_path_for_ref = target
+                    else:
+                        ref_path_for_ref = target
+                    ref_path_for_open = target
+                elif should_recreate:
                     st = Usd.Stage.Open(ref_path_for_open)
                     if st is None:
                         return error_response(
                             "open_failed", f"Failed to open asset: {ref_path_for_open}"
                         )
+                    # Check original upAxis
+                    original_up_axis = UsdGeom.GetStageUpAxis(st)
+                    # Set upAxis on the flattened file if specified
+                    if up_axis is not None:
+                        if str(up_axis).upper().startswith("Z"):
+                            UsdGeom.SetStageUpAxis(st, UsdGeom.Tokens.z)
+                        else:
+                            UsdGeom.SetStageUpAxis(st, UsdGeom.Tokens.y)
+                        # If converting from Z-up to Y-up, rotate -90 degrees around X
+                        if original_up_axis == UsdGeom.Tokens.z and str(
+                            up_axis
+                        ).upper().startswith("Y"):
+                            from pxr import Gf  # type: ignore
+
+                            # Apply rotation to all prims recursively
+                            # First, try to find a "model" prim (common in Blender exports)
+                            # If found, apply rotation there; otherwise apply to root prims
+                            def apply_rotation_to_prim(prim):
+                                xformable = UsdGeom.Xformable(prim)
+                                if xformable:
+                                    xapi = UsdGeom.XformCommonAPI(prim)
+                                    # Get existing rotation from xformOps if present
+                                    existing_rotate = None
+                                    for op in xformable.GetOrderedXformOps():
+                                        op_name = op.GetOpName()
+                                        if op_name.startswith("xformOp:rotate"):
+                                            try:
+                                                rot_val = op.Get(Usd.TimeCode.Default())
+                                                if rot_val is not None:
+                                                    existing_rotate = rot_val
+                                                    break
+                                            except Exception:
+                                                pass
+
+                                    if existing_rotate is not None:
+                                        # Combine with -90 X rotation
+                                        new_rotate = (
+                                            existing_rotate[0] - 90.0,
+                                            existing_rotate[1],
+                                            existing_rotate[2],
+                                        )
+                                    else:
+                                        new_rotate = (-90.0, 0.0, 0.0)
+                                    xapi.SetRotate(
+                                        Gf.Vec3f(*new_rotate),
+                                        UsdGeom.XformCommonAPI.RotationOrderXYZ,
+                                    )
+
+                            # Look for "model" prim first (common in Blender exports)
+                            model_prim = None
+                            root_prims = st.GetPseudoRoot().GetChildren()
+                            for root_prim in root_prims:
+                                # Check if this prim is named "model"
+                                if root_prim.GetName() == "model":
+                                    model_prim = root_prim
+                                    break
+                                # Check children for "model" prim
+                                for child in root_prim.GetChildren():
+                                    if child.GetName() == "model":
+                                        model_prim = child
+                                        break
+                                if model_prim:
+                                    break
+
+                            if model_prim:
+                                # Apply rotation to model prim
+                                apply_rotation_to_prim(model_prim)
+                            else:
+                                # Apply rotation to all root prims
+                                for root_prim in root_prims:
+                                    apply_rotation_to_prim(root_prim)
                     ok = st.Export(target)
                     if not ok:
                         return error_response(
                             "export_failed", f"Failed to export {target}"
                         )
-                # Update ref_path_for_ref to be relative to output if original was relative
-                if not os.path.isabs(src_path):
-                    # Make target path relative to output directory
-                    try:
-                        ref_path_for_ref = os.path.relpath(target, output_dir)
-                    except ValueError:
-                        # If relpath fails (different drives on Windows), use absolute
+                    # Update paths to point to target after creation
+                    if not os.path.isabs(src_path):
+                        try:
+                            ref_path_for_ref = os.path.relpath(target, output_dir)
+                        except ValueError:
+                            ref_path_for_ref = target
+                    else:
                         ref_path_for_ref = target
-                else:
-                    ref_path_for_ref = target
-                ref_path_for_open = target
+                    ref_path_for_open = target
         except Exception as exc:
             return error_response("export_failed", str(exc))
 
