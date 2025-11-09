@@ -190,11 +190,14 @@ Variants (authoring and selection)
 - After authoring, select with setVariantFile. You can have multiple variant sets on the same prim (e.g., asset, size, look, lod).
 - Prefer referencing USDZs without flattening to keep packaged textures intact.
 
-Quick NL prompt (asset swap)
-- “Create/overwrite <mop_variants.usda> (Z-up). Ensure Xform /World/Mop. Author variants on /World/Mop in ONE call: set ‘asset’ with
+Quick NL prompt (single variant - simple)
+- "Create a model variant for </path/to/apple_asset.usda>. Add variant set 'modelVariant' with variant 'bitten' that references ./model/variants/apple_bitten.usda."
+
+Quick NL prompt (asset swap - batch)
+- "Create/overwrite <mop_variants.usda> (Z-up). Ensure Xform /World/Mop. Author variants on /World/Mop in ONE call: set 'asset' with
   - asset.mop: reference </abs/path/mop.usdz> using asset defaultPrim (no flatten)
   - asset.broom: reference </abs/path/broom.usdz> using asset defaultPrim (no flatten)
-  Select asset=mop. Save and export to </abs/path/mop_combined.usdz>. Flat JSON only; don’t write ‘variantSets’.”
+  Select asset=mop. Save and export to </abs/path/mop_combined.usdz>. Flat JSON only; don't write 'variantSets'."
 
 Quick NL prompt (two sets: asset + size)
 - “Create/overwrite <stage.usda> (Z-up). Ensure Xform /World/Item. Author variants in two calls:
@@ -202,7 +205,29 @@ Quick NL prompt (two sets: asset + size)
   2) authorVariantsInFile set=‘size’: full → identity, small → xformOp:transform = diag([0.3,0.3,0.3,1])
   Select asset=mop and size=small. Export to </…/combined.usdz>. Flat JSON only.”
 
-authorVariantsInFile (explicit JSON example)
+authorVariantsInFile (simple single variant - preferred for incremental addition)
+```json
+{
+  "path": "/abs/apple_asset.usda",
+  "prim_path": "/World/Apple",
+  "set": "modelVariant",
+  "variant": "bitten",
+  "asset_path": "./model/variants/apple_bitten.usda"
+}
+```
+
+Single variant with material:
+```json
+{
+  "path": "/abs/asset.usda",
+  "prim_path": "/World/Item",
+  "set": "material",
+  "variant": "red",
+  "material_path": "/World/Materials/RedMaterial"
+}
+```
+
+authorVariantsInFile (batch variants - for creating multiple at once)
 ```json
 {
   "path": "/abs/mop_variants.usda",

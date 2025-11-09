@@ -60,6 +60,557 @@ def tool_set_variant_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
     return _ok({"variantSets": {set_name: selection}})
 
 
+def tool_author_variants_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Author variant sets and variants on a prim in a USD file.
+
+    Supports both single variant (simple API) and batch operations (flexible).
+    Can create variants with references (model variants), material bindings (material variants),
+    transforms (size variants), and other attributes.
+
+    Inputs:
+      - path: USD file path
+      - prim_path: prim to add variant set to
+      - set: variant set name (e.g., "modelVariant", "material", "size")
+      - variant: variant name (for single variant addition - simple API)
+      - asset_path: optional, for model variants (creates reference)
+      - internal_path: optional, for referenced asset (defaults to asset's defaultPrim if not provided)
+      - material_path: optional, for material variants (creates binding)
+      - xform: optional, transform matrix or ops for size/transform variants
+      - attributes: optional dict of attribute values
+      - variants: optional array of variant definitions (for batch operations), each with same structure as above
+      - select: optional, variant name to select after creation
+      - clear_local: optional bool (default true), clear local opinions on attributes that will be variantized
+    """
+    Usd, UsdGeom, _, _ = _import_pxr()
+    try:
+        from pxr import Gf, UsdShade  # type: ignore
+    except Exception:
+        UsdShade = None  # type: ignore
+        Gf = None  # type: ignore
+
+    path = _normalize_file_path(params.get("path"))
+    prim_path: str = params.get("prim_path")
+    set_name: str = params.get("set")
+    variant_name: Optional[str] = params.get("variant")
+    variants_array: Optional[List[Dict[str, Any]]] = params.get("variants")
+    clear_local: bool = bool(params.get("clear_local", True))
+    select: Optional[str] = params.get("select")
+
+    if not path or not prim_path or not set_name:
+        return error_response(
+            "invalid_params", "'path', 'prim_path', and 'set' are required"
+        )
+
+    # Must provide either single variant or variants array
+    if not variant_name and not variants_array:
+        return error_response(
+            "invalid_params", "Either 'variant' or 'variants' array must be provided"
+        )
+    if variant_name and variants_array:
+        return error_response(
+            "invalid_params", "Cannot provide both 'variant' and 'variants' array"
+        )
+
+    stage = Usd.Stage.Open(path)
+    if stage is None:
+        return error_response("open_failed", f"Failed to open stage: {path}")
+
+    prim = stage.GetPrimAtPath(prim_path)
+    if not prim:
+        return error_response("not_found", f"Prim not found: {prim_path}")
+
+    # Capture existing reference if it exists (to preserve it in a default variant)
+    existing_refs = []
+    refs = prim.GetReferences()
+    if refs:
+        # Get existing references from the authored layer
+        # Try multiple methods to ensure we capture the references
+        try:
+            # Method 1: GetAddedOrExplicitItems (preferred)
+            ref_list = refs.GetAddedOrExplicitItems()
+            for ref_item in ref_list:
+                try:
+                    # Sdf.Reference has assetPath and primPath properties
+                    asset_path_str = (
+                        str(ref_item.assetPath) if ref_item.assetPath else None
+                    )
+                    prim_path_str = None
+                    if ref_item.primPath:
+                        prim_path_str = (
+                            str(ref_item.primPath)
+                            if hasattr(ref_item.primPath, "__str__")
+                            else ref_item.primPath.pathString
+                            if hasattr(ref_item.primPath, "pathString")
+                            else None
+                        )
+                    if asset_path_str:
+                        existing_refs.append(
+                            {
+                                "asset_path": asset_path_str,
+                                "internal_path": prim_path_str,
+                            }
+                        )
+                except Exception:
+                    continue
+        except Exception:
+            # Method 2: Try to get from the layer directly
+            try:
+                prim_spec = stage.GetRootLayer().GetPrimAtPath(prim.GetPath())
+                if prim_spec and prim_spec.referenceList:
+                    for ref_item in (
+                        prim_spec.referenceList.prependedItems
+                        + prim_spec.referenceList.explicitItems
+                    ):
+                        try:
+                            asset_path_str = (
+                                str(ref_item.assetPath) if ref_item.assetPath else None
+                            )
+                            prim_path_str = None
+                            if ref_item.primPath:
+                                prim_path_str = str(ref_item.primPath)
+                            if asset_path_str:
+                                existing_refs.append(
+                                    {
+                                        "asset_path": asset_path_str,
+                                        "internal_path": prim_path_str,
+                                    }
+                                )
+                        except Exception:
+                            continue
+            except Exception:
+                # If we can't get existing refs, that's ok - we'll still create default variant
+                pass
+
+    # Get or create variant set (idempotent)
+    vsets = prim.GetVariantSets()
+    try:
+        vset = vsets.GetVariantSet(set_name)
+    except Exception:
+        # Variant set doesn't exist, create it
+        vset = vsets.AddVariantSet(set_name)
+
+    # Normalize to list of variants to process
+    variants_to_process: List[Dict[str, Any]] = []
+    if variants_array:
+        variants_to_process = variants_array
+    elif variant_name:
+        # Single variant mode - extract params for this variant
+        variant_def: Dict[str, Any] = {"name": variant_name}
+        if "asset_path" in params:
+            variant_def["asset_path"] = params.get("asset_path")
+        if "internal_path" in params:
+            variant_def["internal_path"] = params.get("internal_path")
+        if "material_path" in params:
+            variant_def["material_path"] = params.get("material_path")
+        if "xform" in params:
+            variant_def["xform"] = params.get("xform")
+        if "attributes" in params:
+            variant_def["attributes"] = params.get("attributes")
+        variants_to_process = [variant_def]
+
+    # Check if variant set is new (doesn't have variants yet)
+    # If it's new and we're creating variants with asset_path, we should create a "default" variant
+    # to preserve the existing reference (if any)
+    is_new_variant_set = False
+    try:
+        existing_variant_names = vset.GetVariantNames()
+        is_new_variant_set = len(existing_variant_names) == 0
+    except Exception:
+        is_new_variant_set = True
+
+    # If this is a new variant set and we're creating variants with asset_path,
+    # we should always create a "default" variant to preserve existing references
+    # BUT: Only if "default" is not already in the variants array
+    has_default_in_array = any(
+        (v.get("name") or v.get("variant") or "") == "default"
+        for v in variants_to_process
+    )
+    should_create_default = (
+        is_new_variant_set
+        and any(v.get("asset_path") for v in variants_to_process)
+        and not has_default_in_array
+    )
+
+    # Clear local opinions once before processing variants (per OpenUSD best practice)
+    # Local opinions must be cleared outside variant context
+    # BUT: Don't clear references yet if we're creating a default variant - we'll move them there first
+    if clear_local:
+        # Determine what needs to be cleared by checking all variants
+        has_asset_path = any(v.get("asset_path") for v in variants_to_process)
+        has_material_path = any(v.get("material_path") for v in variants_to_process)
+        has_xform = any(v.get("xform") for v in variants_to_process)
+        has_attributes = any(v.get("attributes") for v in variants_to_process)
+
+        # Clear references if any variant will author asset_path
+        # BUT: If we're creating a default variant, we'll move references there first, then clear
+        # So we'll clear references AFTER creating the default variant
+        # (We'll handle this after the default variant is created)
+
+        # Clear material binding if any variant will author material_path
+        if has_material_path and UsdShade:
+            try:
+                UsdShade.MaterialBindingAPI(prim).UnbindAllBindings()
+            except Exception:
+                pass
+
+        # Clear transform ops if any variant will author xform
+        if has_xform:
+            xformable = UsdGeom.Xformable(prim)
+            if xformable:
+                xformable.ClearXformOpOrder()
+
+        # Clear attributes if any variant will author them
+        if has_attributes:
+            all_attr_names = set()
+            for v in variants_to_process:
+                attrs = v.get("attributes")
+                if attrs and isinstance(attrs, dict):
+                    all_attr_names.update(attrs.keys())
+            for attr_name in all_attr_names:
+                attr = prim.GetAttribute(attr_name)
+                if attr:
+                    attr.Clear()
+
+        # Clear references AFTER creating default variant (if we're not creating default)
+        # If we ARE creating default, we'll clear references after moving them to default variant
+        if has_asset_path and not should_create_default:
+            refs = prim.GetReferences()
+            if refs:
+                refs.ClearReferences()
+
+    # If this is a new variant set and user didn't provide "default" explicitly,
+    # create a "default" variant to preserve existing references (if any)
+    if should_create_default:
+        default_variant_name = "default"
+        try:
+            vset.AddVariant(default_variant_name)
+        except Exception:
+            pass  # Already exists
+
+        try:
+            vset.SetVariantSelection(default_variant_name)
+        except Exception as exc:
+            return error_response(
+                "set_failed", f"Failed to set default variant selection: {exc}"
+            )
+
+        try:
+            with vset.GetVariantEditContext():
+                # Add existing references to default variant (if any)
+                if existing_refs:
+                    for ref_info in existing_refs:
+                        try:
+                            if ref_info["internal_path"]:
+                                prim.GetReferences().AddReference(
+                                    ref_info["asset_path"], ref_info["internal_path"]
+                                )
+                            else:
+                                prim.GetReferences().AddReference(
+                                    ref_info["asset_path"]
+                                )
+                        except Exception as exc:
+                            return error_response(
+                                "reference_failed",
+                                f"Failed to preserve existing reference in default variant: {exc}",
+                            )
+                # If no existing references, the default variant will be empty
+                # This is fine - it represents the "original" state before variants
+        except Exception as exc:
+            return error_response(
+                "variant_failed", f"Failed to author default variant: {exc}"
+            )
+
+        # After creating default variant, clear local references if they were moved
+        # This is critical: we've moved the references to the default variant, so clear local ones
+        if existing_refs and clear_local:
+            refs = prim.GetReferences()
+            if refs:
+                # Clear local references - they're now in the default variant
+                refs.ClearReferences()
+
+    # If user provided "default" explicitly in variants array, we still need to clear local refs
+    # (they'll be using the asset_path they provided, not the existing reference)
+    elif has_default_in_array and existing_refs and clear_local:
+        # User provided "default" explicitly, so clear local references
+        # They'll use their own asset_path for the default variant
+        refs = prim.GetReferences()
+        if refs:
+            refs.ClearReferences()
+
+    # Process each variant
+    created_variants: List[str] = []
+    for variant_def in variants_to_process:
+        # Support both "name" and "variant" as keys for variant name
+        var_name: str = variant_def.get("name") or variant_def.get("variant") or ""
+        if not var_name:
+            continue
+
+        # Add variant if not exists (idempotent)
+        try:
+            vset.AddVariant(var_name)
+        except Exception:
+            # Variant already exists, that's ok
+            pass
+
+        # Set variant selection to enter edit context
+        try:
+            vset.SetVariantSelection(var_name)
+        except Exception as exc:
+            return error_response(
+                "set_failed", f"Failed to set variant selection: {exc}"
+            )
+
+        # Enter variant edit context
+        # Following Pixar pattern: AddVariant -> SetVariantSelection -> GetVariantEditContext
+        try:
+            with vset.GetVariantEditContext():
+                # Author reference if asset_path provided
+                # Support both formats:
+                # 1. Direct: {"name": "bitten", "asset_path": "./path.usda"}
+                # 2. Nested: {"name": "bitten", "references": [{"asset_path": "./path.usda"}]}
+                asset_path = variant_def.get("asset_path")
+                internal_path_from_variant = variant_def.get("internal_path")
+
+                # If asset_path not found, check references array
+                if not asset_path:
+                    references = variant_def.get("references")
+                    if (
+                        references
+                        and isinstance(references, list)
+                        and len(references) > 0
+                    ):
+                        # Take first reference from array
+                        ref_obj = references[0]
+                        if isinstance(ref_obj, dict):
+                            asset_path = ref_obj.get("asset_path")
+                            if not internal_path_from_variant:
+                                internal_path_from_variant = ref_obj.get(
+                                    "internal_path"
+                                )
+
+                if asset_path:
+                    # Normalize the asset path (resolve relative paths)
+                    asset_path = _normalize_file_path(asset_path)
+                    if not asset_path:
+                        return error_response(
+                            "invalid_params",
+                            f"Failed to normalize asset_path for variant '{var_name}'",
+                        )
+                    internal_path: str = (internal_path_from_variant or "").strip()
+                    if internal_path == "/":
+                        internal_path = ""
+
+                    # Resolve internal_path from asset's defaultPrim if not provided
+                    if internal_path == "":
+                        try:
+                            ref_stage = Usd.Stage.Open(asset_path)
+                            if ref_stage:
+                                dp = ref_stage.GetDefaultPrim()
+                                if dp and dp.IsValid():
+                                    internal_path = dp.GetPath().pathString
+                        except Exception:
+                            internal_path = ""
+
+                    try:
+                        # Add reference inside variant context
+                        # Note: We're inside GetVariantEditContext(), so this will be authored in the variant
+                        if internal_path:
+                            prim.GetReferences().AddReference(asset_path, internal_path)
+                        else:
+                            prim.GetReferences().AddReference(asset_path)
+                        # Verify the reference was added (for debugging)
+                        # Note: This check happens after the context exits, so we can't verify here
+                    except Exception as exc:
+                        # Provide more detailed error message
+                        error_msg = (
+                            f"Failed to add reference to variant '{var_name}': {exc}"
+                        )
+                        if asset_path:
+                            error_msg += f" (asset_path: {asset_path}, internal_path: {internal_path or 'none'})"
+                        return error_response("reference_failed", error_msg)
+
+                # Author material binding if material_path provided
+                material_path = variant_def.get("material_path")
+                if material_path and UsdShade:
+                    mat_prim = stage.GetPrimAtPath(material_path)
+                    if not mat_prim:
+                        return error_response(
+                            "not_found", f"Material not found: {material_path}"
+                        )
+                    mat = UsdShade.Material(mat_prim)
+                    if not mat:
+                        return error_response(
+                            "invalid_params",
+                            f"Not a UsdShade.Material: {material_path}",
+                        )
+                    try:
+                        UsdShade.MaterialBindingAPI(prim).Bind(mat)
+                    except Exception as exc:
+                        return error_response(
+                            "bind_failed", f"Failed to bind material: {exc}"
+                        )
+
+                # Author transform if xform provided
+                xform = variant_def.get("xform")
+                if xform:
+                    xformable = UsdGeom.Xformable(prim)
+                    if not xformable:
+                        return error_response(
+                            "invalid_params", f"Prim is not Xformable: {prim_path}"
+                        )
+
+                    time_code = Usd.TimeCode.Default()
+
+                    # Handle matrix format
+                    if isinstance(xform, (list, tuple)) and len(xform) == 4:
+                        # Check if it's a matrix (list of 4 lists)
+                        if all(
+                            isinstance(row, (list, tuple)) and len(row) == 4
+                            for row in xform
+                        ):
+                            if Gf:
+                                try:
+                                    m = Gf.Matrix4d(xform)
+                                    xf_op = xformable.AddXformOp(
+                                        UsdGeom.XformOp.TypeTransform
+                                    )
+                                    xf_op.Set(m, time_code)
+                                except Exception as exc:
+                                    return error_response(
+                                        "xform_failed", f"Failed to set matrix: {exc}"
+                                    )
+                            else:
+                                return error_response(
+                                    "missing_usd",
+                                    "Gf not available for matrix transforms",
+                                )
+                        else:
+                            # Treat as ops array
+                            ops = xform
+                    elif isinstance(xform, dict):
+                        # Single op dict
+                        ops = [xform]
+                    else:
+                        # Assume it's an ops array
+                        ops = xform if isinstance(xform, list) else [xform]
+
+                    # Handle ops format
+                    if isinstance(ops, list):
+                        xapi = UsdGeom.XformCommonAPI(prim)
+                        translate_val = None
+                        scale_val = None
+                        rotate_val = None
+
+                        for entry in ops:
+                            if isinstance(entry, dict):
+                                op_raw = entry.get("op") or entry.get("opType") or ""
+                                op = str(op_raw).lower().strip()
+                                if op.startswith("xformop:"):
+                                    op = op.split(":", 1)[1]
+                                val = entry.get("value")
+                                if op in ("translate", "t") and isinstance(
+                                    val, (list, tuple)
+                                ):
+                                    translate_val = [
+                                        float(val[0]),
+                                        float(val[1]),
+                                        float(val[2]),
+                                    ]
+                                elif op in ("scale", "s") and isinstance(
+                                    val, (list, tuple)
+                                ):
+                                    scale_val = [
+                                        float(val[0]),
+                                        float(val[1]),
+                                        float(val[2]),
+                                    ]
+                                elif op in ("rotatexyz", "r") and isinstance(
+                                    val, (list, tuple)
+                                ):
+                                    rotate_val = [
+                                        float(val[0]),
+                                        float(val[1]),
+                                        float(val[2]),
+                                    ]
+
+                        if Gf:
+                            if translate_val is not None:
+                                xapi.SetTranslate(Gf.Vec3d(*translate_val), time_code)
+                            if rotate_val is not None:
+                                try:
+                                    xapi.SetRotate(
+                                        Gf.Vec3f(*rotate_val),
+                                        UsdGeom.XformCommonAPI.RotationOrderXYZ,
+                                        time_code,
+                                    )
+                                except Exception:
+                                    try:
+                                        xapi.SetRotate(Gf.Vec3f(*rotate_val))
+                                    except Exception:
+                                        pass
+                            if scale_val is not None:
+                                xapi.SetScale(Gf.Vec3f(*scale_val), time_code)
+
+                # Author other attributes if provided
+                attributes = variant_def.get("attributes")
+                if attributes and isinstance(attributes, dict):
+                    for attr_name, attr_value in attributes.items():
+                        try:
+                            attr = prim.GetAttribute(attr_name)
+                            if not attr:
+                                # Create attribute if it doesn't exist
+                                attr = prim.CreateAttribute(attr_name, type(attr_value))
+                            attr.Set(attr_value)
+                        except Exception as exc:
+                            return error_response(
+                                "attr_failed",
+                                f"Failed to set attribute {attr_name}: {exc}",
+                            )
+
+                created_variants.append(var_name)
+
+        except Exception as exc:
+            # Don't return error immediately - collect errors and continue processing
+            # This allows us to process all variants even if one fails
+            error_msg = f"Failed to author variant '{var_name}': {exc}"
+            # For now, we'll still return error to surface issues, but log which variant failed
+            return error_response("variant_failed", error_msg)
+
+    # Set final variant selection if provided
+    # If no selection provided and we created a default variant, use "default"
+    # Otherwise, use the last created variant or the provided selection
+    final_selection = select
+    if not final_selection and should_create_default:
+        final_selection = "default"
+    elif not final_selection and created_variants:
+        final_selection = created_variants[-1]
+
+    if final_selection:
+        try:
+            vset.SetVariantSelection(final_selection)
+        except Exception as exc:
+            return error_response("set_failed", f"Failed to set final selection: {exc}")
+
+    # Save
+    root = stage.GetRootLayer()
+    if not root.Save():
+        return error_response("save_failed", "Failed to save after authoring variants")
+
+    # Include default variant in the list if it was created
+    all_variants = created_variants.copy()
+    if should_create_default and "default" not in all_variants:
+        all_variants.insert(0, "default")
+
+    return _ok(
+        {
+            "prim_path": prim_path,
+            "set": set_name,
+            "variants": all_variants,
+            "selection": final_selection or None,
+        }
+    )
+
+
 # Materials
 def tool_list_materials_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
     Usd, _, _, _ = _import_pxr()

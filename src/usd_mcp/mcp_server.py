@@ -108,6 +108,28 @@ TOOLS: Dict[str, Any] = {
         },
         "Stateless: set variant selection and save.",
     ),
+    "author_variants_in_file": (
+        t3.tool_author_variants_in_file,
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "prim_path": {"type": "string"},
+                "set": {"type": "string"},
+                "variant": {"type": "string"},
+                "asset_path": {"type": "string"},
+                "internal_path": {"type": "string"},
+                "material_path": {"type": "string"},
+                "xform": {},
+                "attributes": {"type": "object"},
+                "variants": {"type": "array"},
+                "select": {"type": "string"},
+                "clear_local": {"type": "boolean"},
+            },
+            "additionalProperties": True,
+        },
+        "Stateless: author variant sets and variants (supports single variant or batch).",
+    ),
     # Materials
     "list_materials_in_file": (
         t3.tool_list_materials_in_file,
@@ -642,6 +664,7 @@ _short_aliases = {
     "set_xform_in_file": ["setXformFile"],
     "list_variants_in_file": ["listVariantsFile"],
     "set_variant_in_file": ["setVariantFile"],
+    "author_variants_in_file": ["authorVariantsFile"],
     "list_materials_in_file": ["listMaterialsFile"],
     "bind_material_in_file": ["bindMaterialFile"],
     "unbind_material_in_file": ["unbindMaterialFile"],
