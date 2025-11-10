@@ -1,0 +1,27 @@
+#usda 1.0
+(
+    defaultPrim = "cube_asset"
+    upAxis = "Y"
+)
+
+def Xform "cube_asset" (
+    variants = {
+        string modelVariant = "default"
+    }
+    prepend variantSets = "modelVariant"
+)
+{
+    variantSet "modelVariant" = {
+        "default" (
+            prepend references = @model/cube.usda@
+        ) {
+
+        }
+        "open" (
+            prepend references = @model/cube_open.usda@
+        ) {
+
+        }
+    }
+}
+

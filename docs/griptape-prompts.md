@@ -1,4 +1,10 @@
 Sample natural-language prompts for Griptape (MCP)
+
+**Key Workflow for Maya Compatibility:**
+1. **Asset Assemblies from USDZ files**: Use `flatten: true` and `upAxis: "Y"` - this creates a flattened USDA file with Y-up automatically and applies a -90 degree X rotation to correct orientation when converting from Z-up to Y-up
+2. **Layout Files**: Use `flatten: false` and `upAxis: "Y"` - references the Y-up asset assemblies
+3. **Transforms**: Use `setXformFile` (NOT `batchSetAttributesInFile`) - scale from referenced files is automatically preserved
+4. **Internal Paths**: Set `internal_path: null` to reference the root of asset files without an internal path
 =================================================
 
 Use these directly as chat prompts in Griptape Nodes. They map to the current Tier 0 tools and the added stateless helpers. Replace <path> with your file when needed.
@@ -15,7 +21,7 @@ Agent Rules
   - Avoid persistent stage_id flows unless explicitly requested; if needed, use openStage, listOpenStages, closeStage.
   - Use only alphanumeric tool names (camelCase) as advertised by the server.
 - Inputs
-  - Provide a flat JSON object for inputs (no nested {"values":{...}} wrapper).
+  - The MCP server automatically handles Griptape's `{"values":{...}}` wrapper, so you can provide inputs either way.
   - Use canonical keys: path, prim_path, root, depth, attr, value, time, ops, matrix.
   - Trim whitespace in all path-like strings; prefer absolute paths when available.
 - Outputs
@@ -28,6 +34,10 @@ Agent Rules
 - Transforms
   - For setXformFile, prefer ops (translate, rotateXYZ in degrees, scale). Fallback to a 4×4 matrix when necessary.
   - Ops input MUST be an array of entries: [{"op":"translate","value":[x,y,z]}]. Do not use a single dict.
+  - **IMPORTANT**: Always use setXformFile to set transforms, NOT batchSetAttributesInFile. xformOps must be created properly using setXformFile.
+  - **Layout files (multiple assets)**: When creating layout files with multiple assets, composeReferencedAssembly automatically creates a wrapper Xform structure: `/container/name` (wrapper for layout transforms) -> `/container/name/asset_name` (reference preserves asset transforms). **Set layout transforms (translate, rotate) on the wrapper prim** (e.g., `/layout/apple`), not on the reference prim (e.g., `/layout/apple/apple_asset`). This preserves the asset's transforms (like scale) while allowing layout transforms to be applied separately.
+  - **Single asset assemblies**: For single asset assemblies, the reference is placed directly on the prim (no wrapper structure).
+  - When setting transforms on prims that reference other files, the transforms in the referenced files are preserved automatically by USD composition. The transforms you set on the referencing prim are separate and additive.
   - Verify transforms by calling getXformFile and reading worldMatrix.
 - Attributes
   - Use getAttrFile/setAttrFile for single reads/writes; use time: "default" unless a timeCode is requested.
@@ -38,10 +48,24 @@ Agent Rules
 
 Composition (preferred)
 - One‑shot compose with optional USDZ→USDA flatten, container root, and defaultPrim:
-  - "Execute one action and print only the tool’s JSON result. No prose. Call composeReferencedAssembly with: {\"output_path\":\"<assembly.usda>\",\"assets\":[{\"asset_path\":\"<a.usdz>\",\"name\":\"a\",\"internal_path\":\"/root/model\"},{\"asset_path\":\"<b.usdz>\",\"name\":\"b\",\"internal_path\":\"/root/model\"}],\"container_root\":\"/Assets\",\"flatten\":true,\"upAxis\":\"Z\",\"setDefaultPrim\":true,\"skipIfExists\":true}."
+  - "Execute one action and print only the tool's JSON result. No prose. Call composeReferencedAssembly with: {\"output_path\":\"<assembly.usda>\",\"assets\":[{\"asset_path\":\"<a.usdz>\",\"name\":\"a\",\"internal_path\":\"/root/model\"},{\"asset_path\":\"<b.usdz>\",\"name\":\"b\",\"internal_path\":\"/root/model\"}],\"container_root\":\"/Assets\",\"flatten\":true,\"upAxis\":\"Z\",\"setDefaultPrim\":true,\"skipIfExists\":true}."
 - Notes:
-  - internal_path can be omitted; the server resolves it from the asset’s defaultPrim. Supplying "/root/model" explicitly makes viewers resolve predictably.
+  - internal_path can be omitted; the server resolves it from the asset's defaultPrim. Supplying "/root/model" explicitly makes viewers resolve predictably.
   - composeReferencedAssembly is idempotent: it opens or creates stages, ensures container root, and sets defaultPrim when requested.
+  - **container_root**: If omitted or set to `/Assets`, automatically derives from output_path filename (e.g., `/path/to/blue_shoe_asset.usda` → `/blue_shoe_asset`). If explicitly provided, uses that value.
+  - **flatten**: Set `flatten: false` to keep USDZ files as references (don't convert to USDA). Default is `true`. **IMPORTANT FOR MAYA**: When creating asset assemblies from Z-up USDZ files for Maya, set `flatten: true` and `upAxis: "Y"` - this will create a flattened USDA file with Y-up in the same directory as the original USDZ (e.g., `apple.usdz` → `apple.usda`). The flattened file will have the correct upAxis set automatically, and if converting from Z-up to Y-up, a -90 degree X rotation will be applied to the root prims to correct the orientation.
+  - **clearExisting**: Set `clearExisting: true` to clear all root prims before composing. Default is `false`.
+  - **upAxis**: Set to `"Y"` for Maya compatibility (default is `"Z"`). **CRITICAL FOR MAYA**: Maya expects Y-up by default. **Always use `upAxis: "Y"` for both asset assemblies and layout files that will be used in Maya**. **IMPORTANT**: If the original USDZ files are Z-up, set `flatten: true` and `upAxis: "Y"` when creating asset assemblies - this will flatten the USDZ to USDA, set the upAxis to Y on the flattened file automatically, and apply a -90 degree X rotation to the root prims to correct the orientation when converting from Z-up to Y-up. USD does NOT automatically convert transforms when referencing files with different upAxis values - the transforms in the referenced file are still in the original upAxis space, but they're being interpreted in the referencing file's upAxis space, which causes orientation issues. The upAxis is updated even when opening existing files if explicitly provided. If you have existing flattened files with `upAxis = "Z"`, they will be updated to Y-up when you call `composeReferencedAssembly` with `upAxis: "Y"` and `flatten: true` (even if the file already exists).
+  - **Relative paths**: Use relative paths like `"./model/asset.usdz"` for asset_path - they resolve relative to the output file's directory.
+  - **internal_path**: In asset objects, controls which prim in the referenced file to reference:
+    - If omitted or empty string: automatically resolves the referenced file's defaultPrim
+    - If explicitly set to `null`: references the root of the file without an internal_path (e.g., `@./apple/apple_asset.usda@` instead of `@./apple/apple_asset.usda@</apple_asset>`)
+    - If set to a specific path: uses that path (e.g., `"/root/model"`)
+    - When user says "reference the root" or "without internal_path", set `internal_path: null` for each asset
+- Example for single asset assembly (from USDZ for Maya):
+  - "Create an assembly by referencing ./model/blue_shoe.usdz as blue_shoe_asset. Use composeReferencedAssembly with: {\"output_path\":\"/path/to/blue_shoe_asset.usda\",\"assets\":[{\"asset_path\":\"./model/blue_shoe.usdz\",\"name\":\"blue_shoe_asset\"}],\"flatten\":true,\"clearExisting\":true,\"upAxis\":\"Y\"}. Note: container_root is automatically derived from output_path filename (/blue_shoe_asset), so it can be omitted. For Maya compatibility, use flatten: true and upAxis: \"Y\" - this will create a flattened USDA file (blue_shoe.usda) with Y-up in the same directory as the original USDZ."
+- Example for layout assembly (multiple assets):
+  - "Create a layout assembly by referencing multiple asset files. Use composeReferencedAssembly with: {\"output_path\":\"/path/to/layout.usda\",\"assets\":[{\"asset_path\":\"./apple/apple_asset.usda\",\"name\":\"apple\",\"internal_path\":null},{\"asset_path\":\"./blue_shoe/blue_shoe_asset.usda\",\"name\":\"blue_shoe\",\"internal_path\":null}],\"container_root\":\"/World\",\"flatten\":false,\"clearExisting\":true,\"upAxis\":\"Y\"}. When user says 'reference the root' or 'without internal_path', set internal_path: null for each asset. IMPORTANT: Always set upAxis: \"Y\" for layout files and asset assemblies that will be used in Maya. **For layout files, composeReferencedAssembly creates a wrapper Xform structure** - set layout transforms (translate, rotate) on the wrapper prim (e.g., `/World/apple`), not on the reference prim (e.g., `/World/apple/apple_asset`). This preserves the asset's transforms (like scale) while allowing layout transforms to be applied separately."
 
 Composition (fallback batch)
 - If composeReferencedAssembly is unavailable:
@@ -166,11 +190,14 @@ Variants (authoring and selection)
 - After authoring, select with setVariantFile. You can have multiple variant sets on the same prim (e.g., asset, size, look, lod).
 - Prefer referencing USDZs without flattening to keep packaged textures intact.
 
-Quick NL prompt (asset swap)
-- “Create/overwrite <mop_variants.usda> (Z-up). Ensure Xform /World/Mop. Author variants on /World/Mop in ONE call: set ‘asset’ with
+Quick NL prompt (single variant - simple)
+- "Create a model variant for </path/to/apple_asset.usda>. Add variant set 'modelVariant' with variant 'bitten' that references ./model/variants/apple_bitten.usda."
+
+Quick NL prompt (asset swap - batch)
+- "Create/overwrite <mop_variants.usda> (Z-up). Ensure Xform /World/Mop. Author variants on /World/Mop in ONE call: set 'asset' with
   - asset.mop: reference </abs/path/mop.usdz> using asset defaultPrim (no flatten)
   - asset.broom: reference </abs/path/broom.usdz> using asset defaultPrim (no flatten)
-  Select asset=mop. Save and export to </abs/path/mop_combined.usdz>. Flat JSON only; don’t write ‘variantSets’.”
+  Select asset=mop. Save and export to </abs/path/mop_combined.usdz>. Flat JSON only; don't write 'variantSets'."
 
 Quick NL prompt (two sets: asset + size)
 - “Create/overwrite <stage.usda> (Z-up). Ensure Xform /World/Item. Author variants in two calls:
@@ -178,7 +205,29 @@ Quick NL prompt (two sets: asset + size)
   2) authorVariantsInFile set=‘size’: full → identity, small → xformOp:transform = diag([0.3,0.3,0.3,1])
   Select asset=mop and size=small. Export to </…/combined.usdz>. Flat JSON only.”
 
-authorVariantsInFile (explicit JSON example)
+authorVariantsInFile (simple single variant - preferred for incremental addition)
+```json
+{
+  "path": "/abs/apple_asset.usda",
+  "prim_path": "/World/Apple",
+  "set": "modelVariant",
+  "variant": "bitten",
+  "asset_path": "./model/variants/apple_bitten.usda"
+}
+```
+
+Single variant with material:
+```json
+{
+  "path": "/abs/asset.usda",
+  "prim_path": "/World/Item",
+  "set": "material",
+  "variant": "red",
+  "material_path": "/World/Materials/RedMaterial"
+}
+```
+
+authorVariantsInFile (batch variants - for creating multiple at once)
 ```json
 {
   "path": "/abs/mop_variants.usda",

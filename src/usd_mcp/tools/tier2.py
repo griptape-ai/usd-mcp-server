@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from ..errors import error_response
 from ..server import _import_pxr
-from .tier0 import _ok, _normalize_file_path, _jsonify  # reuse helpers
+from .tier0 import _jsonify, _normalize_file_path, _ok  # reuse helpers
 
 
 def tool_create_prim_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -42,7 +42,9 @@ def tool_create_prim_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
             prim = stage.DefinePrim(sdf_path, type_name or "")
 
         if not prim:
-            return error_response("create_failed", f"Could not create prim at {prim_path}")
+            return error_response(
+                "create_failed", f"Could not create prim at {prim_path}"
+            )
 
         root = stage.GetRootLayer()
         if not root.Save():
@@ -68,7 +70,9 @@ def tool_delete_prim_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
         if not stage.GetPrimAtPath(prim_path):
             return error_response("not_found", f"Prim not found: {prim_path}")
         if not stage.RemovePrim(Sdf.Path(prim_path)):
-            return error_response("delete_failed", f"Failed to delete prim: {prim_path}")
+            return error_response(
+                "delete_failed", f"Failed to delete prim: {prim_path}"
+            )
         root = stage.GetRootLayer()
         if not root.Save():
             return error_response("save_failed", "Failed to save after delete")
@@ -96,7 +100,9 @@ def tool_get_xform_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
     if not prim:
         return error_response("not_found", f"Prim not found: {prim_path}")
 
-    time_code = Usd.TimeCode.Default() if when == "default" else Usd.TimeCode(float(when))
+    time_code = (
+        Usd.TimeCode.Default() if when == "default" else Usd.TimeCode(float(when))
+    )
     # Ensure prim is Xform-typed if it's untyped, so xform ops can be authored
     try:
         if not prim.GetTypeName():
@@ -188,23 +194,29 @@ def tool_get_xform_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
         if hasattr(m, "GetRow"):
             for r in range(4):
                 row = m.GetRow(r)
-                rows.append([float(row[0]), float(row[1]), float(row[2]), float(row[3])])
+                rows.append(
+                    [float(row[0]), float(row[1]), float(row[2]), float(row[3])]
+                )
             return rows
         # Sequence path (tuple/ list of rows)
         try:
             for r in range(4):
                 row = m[r]
-                rows.append([float(row[0]), float(row[1]), float(row[2]), float(row[3])])
+                rows.append(
+                    [float(row[0]), float(row[1]), float(row[2]), float(row[3])]
+                )
             return rows
         except Exception:
             # Fallback: identity
             return [[1.0 if i == j else 0.0 for j in range(4)] for i in range(4)]
 
-    return _ok({
-        "ops": ops,
-        "localMatrix": _m4_to_list(local),
-        "worldMatrix": _m4_to_list(world),
-    })
+    return _ok(
+        {
+            "ops": ops,
+            "localMatrix": _m4_to_list(local),
+            "worldMatrix": _m4_to_list(world),
+        }
+    )
 
 
 def tool_set_xform_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -230,7 +242,9 @@ def tool_set_xform_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
         return error_response("not_found", f"Prim not found: {prim_path}")
 
     xformable = UsdGeom.Xformable(prim)
-    time_code = Usd.TimeCode.Default() if when == "default" else Usd.TimeCode(float(when))
+    time_code = (
+        Usd.TimeCode.Default() if when == "default" else Usd.TimeCode(float(when))
+    )
 
     # Set transform matrix without removing existing ops
     if matrix is not None:
@@ -302,14 +316,19 @@ def tool_set_xform_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
 
         # Keep transforms authored on the target prim; do not reroute to children.
 
-        # Apply via CommonAPI
+        # Apply via CommonAPI - only set what's provided (overrides, not preserves)
         if translate_val is not None:
             xapi.SetTranslate(Gf.Vec3d(*translate_val), time_code)
         if rotate_val is not None:
             # Degrees, XYZ order
             try:
                 from pxr import UsdGeom as _UG  # type: ignore
-                xapi.SetRotate(Gf.Vec3f(*rotate_val), _UG.XformCommonAPI.RotationOrderXYZ, time_code)
+
+                xapi.SetRotate(
+                    Gf.Vec3f(*rotate_val),
+                    _UG.XformCommonAPI.RotationOrderXYZ,
+                    time_code,
+                )
             except Exception:
                 # Fallback without explicit order arg
                 try:
@@ -319,9 +338,78 @@ def tool_set_xform_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
         if scale_val is not None:
             xapi.SetScale(Gf.Vec3f(*scale_val), time_code)
 
-        # Rebuild op order without any existing TypeTransform ops
-        current_ops = [op for op in xformable.GetOrderedXformOps() if op.GetOpType() != UsdGeom.XformOp.TypeTransform]
-        # Ensure CommonAPI ops are present (they should be)
+        # Rebuild op order: include ops that were explicitly set, plus any scale from referenced files
+        # This ensures we only override what's provided, but preserve scale from references
+        current_ops = []
+        all_ops = xformable.GetOrderedXformOps()
+
+        # Track which ops we've explicitly set
+        set_translate = translate_val is not None
+        set_rotate = rotate_val is not None
+        set_scale = scale_val is not None
+
+        # Check if prim has references - if so, we need to preserve scale from references
+        has_references = prim.HasAuthoredReferences()
+
+        # Check if scale exists in composition (from references) even if not authored on this prim
+        scale_from_refs = False
+        if has_references and not set_scale:
+            try:
+                # Check if scale attribute exists when composed (from references)
+                scale_attr = prim.GetAttribute("xformOp:scale")
+                if scale_attr:
+                    # Try to get the composed value
+                    scale_val_composed = scale_attr.Get(time_code)
+                    if scale_val_composed is not None:
+                        scale_from_refs = True
+            except Exception:
+                pass
+
+        # Build op order in standard order: translate, rotate, scale
+        # Include ops that were explicitly set, plus scale if it exists (from references)
+        for op in all_ops:
+            op_type = op.GetOpType()
+            op_name = op.GetName()
+            # Skip TypeTransform ops
+            if op_type == UsdGeom.XformOp.TypeTransform:
+                continue
+            # Include translate if explicitly set
+            if op_name == "xformOp:translate" and set_translate:
+                current_ops.append(op)
+            # Include rotate if explicitly set
+            elif op_name.startswith("xformOp:rotate") and set_rotate:
+                current_ops.append(op)
+            # Include scale if explicitly set OR if it exists from references
+            elif op_name == "xformOp:scale":
+                if set_scale:
+                    # Explicitly set scale - include it
+                    current_ops.append(op)
+                elif scale_from_refs:
+                    # Scale exists from references - preserve it in op order
+                    current_ops.append(op)
+                else:
+                    # Check if scale op has a value (not from references)
+                    try:
+                        if op.Get(time_code) is not None:
+                            current_ops.append(op)
+                    except Exception:
+                        pass
+
+        # If scale exists from references but wasn't in all_ops, we need to add it
+        if scale_from_refs and not set_scale:
+            # Check if we already have a scale op in current_ops
+            has_scale_op = any(op.GetName() == "xformOp:scale" for op in current_ops)
+            if not has_scale_op:
+                # Scale exists from references but no op was found - create one to preserve it
+                try:
+                    scale_op = xformable.AddXformOp(
+                        UsdGeom.XformOp.TypeScale, UsdGeom.XformOp.PrecisionFloat
+                    )
+                    current_ops.append(scale_op)
+                except Exception:
+                    pass
+
+        # Set the op order - what was explicitly provided plus preserved scale
         if current_ops:
             xformable.SetXformOpOrder(current_ops)
     else:
@@ -331,5 +419,3 @@ def tool_set_xform_in_file(params: Dict[str, Any]) -> Dict[str, Any]:
     if not root.Save():
         return error_response("save_failed", "Failed to save after set_xform")
     return _ok({"output_path": root.identifier})
-
-
